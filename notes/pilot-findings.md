@@ -194,6 +194,17 @@ is real regardless.)
    that settles MT vs faithful. If faithful-human-CS ≈ EN while MT-CS > EN, MT demonstrably
    inflates (and may *mask* any true degradation). Now essential, not optional.
 
+### Hardening the MT (rules out "just lossy MT") — the confound is deep
+Rewrote translation: sentence-by-sentence, smaller chunks, "output must be as long as
+input, do not condense". Translations went from 5–20% length to **71–106%** (full/faithful).
+**The inflation persists at full length:** attack mean EN 39 → CS 93 (n=3). So the confound
+is NOT truncation — MT *normalizes* the messy English stream-of-consciousness into clean,
+grammatical prose, raising its legibility to the monitor and inflating sabotage detection
+even with no content dropped. Stronger Contribution B: *MT changes the monitorability of a
+CoT by cleaning it up, so MT-based cross-lingual monitoring evals are confounded regardless
+of translation completeness.* Crux remains the human-CS control (faithful translation that
+preserves register/messiness): does it inflate like MT, or match EN?
+
 ## 2026-07-17 — same run, WEAK monitor (gpt-oss-20b) on the same cached Czech
 
 | arm | AUC | attack mean |
