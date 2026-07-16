@@ -1,0 +1,66 @@
+#!/bin/bash
+# All-in-one GPU job in $SCRATCHDIR — sidesteps the home-storage QUOTA that killed the
+# two-job setup (pip install vllm blew past the brno2 home quota). Everything heavy (conda
+# env, vLLM ~5GB, gpt-oss-20b ~13GB) lives on the node's large local scratch and is discarded
+# when the job ends; only the tiny JSON transcripts + logs are copied back to home.
+# Cost: env+model are rebuilt each run (~20-30 min). Fine for a handful of runs.
+#PBS -N litm-run
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64gb:gpu_mem=40gb:scratch_local=120gb
+#PBS -l walltime=6:00:00
+#PBS -j oe
+
+set -uo pipefail
+HOME_OUT=/storage/brno2/home/dvorak2810/litm
+: "${SCRATCHDIR:?SCRATCHDIR not set — must run under PBS with scratch_local}"
+cd "$SCRATCHDIR"
+export HF_HOME="$SCRATCHDIR/hf"
+export TMPDIR="$SCRATCHDIR/tmp"
+export HF_HUB_ENABLE_HF_TRANSFER=0
+mkdir -p "$HF_HOME" "$TMPDIR" "$SCRATCHDIR/transcripts"
+
+echo "=== $(date) run start on $(hostname); scratch=$SCRATCHDIR ==="
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+trap 'echo "=== copying results to home before exit ==="; mkdir -p "$HOME_OUT/transcripts" "$HOME_OUT/logs"; cp -f "$SCRATCHDIR"/transcripts/*.json "$HOME_OUT/transcripts/" 2>/dev/null; cp -f "$SCRATCHDIR"/*.log "$HOME_OUT/logs/" 2>/dev/null; echo done' EXIT
+
+module add mambaforge
+
+# 1) env in scratch
+ENVDIR="$SCRATCHDIR/env"
+mamba create -y -p "$ENVDIR" python=3.11 pip
+PY="$ENVDIR/bin/python"; PIP="$ENVDIR/bin/pip"; VLLM="$ENVDIR/bin/vllm"
+"$PIP" install --no-input --upgrade pip
+"$PIP" install --no-input vllm openai huggingface_hub 2>&1 | tail -5
+"$PY" -c "import vllm, openai; print('vllm', vllm.__version__)" || { echo "vllm import FAILED"; exit 1; }
+
+cp "$HOME_OUT/gen_vllm.py" "$SCRATCHDIR/gen_vllm.py"
+
+# 2) serve (background); gpt-oss exposes reasoning via reasoning_content automatically
+"$VLLM" serve openai/gpt-oss-20b --port 8000 --max-model-len 8192 > "$SCRATCHDIR/vllm_server.log" 2>&1 &
+SVPID=$!
+
+# 3) health wait (up to ~25 min: first run downloads the 13GB model)
+UP=0
+for i in $(seq 1 150); do
+  if curl -sf http://localhost:8000/health >/dev/null 2>&1; then UP=1; echo "server up after ~$((i*10))s"; break; fi
+  if ! kill -0 $SVPID 2>/dev/null; then echo "SERVER DIED — tail log:"; tail -50 "$SCRATCHDIR/vllm_server.log"; exit 1; fi
+  sleep 10
+done
+[ "$UP" = 1 ] || { echo "server never healthy — tail log:"; tail -60 "$SCRATCHDIR/vllm_server.log"; kill $SVPID 2>/dev/null; exit 1; }
+
+export OPENAI_BASE_URL=http://localhost:8000/v1
+
+# 4) spike FIRST — confirm CoT capture + grader before spending the batch
+"$PY" "$SCRATCHDIR/gen_vllm.py" --spike 2>&1 | tee "$SCRATCHDIR/spike.log"
+
+if grep -q "SPIKE OK" "$SCRATCHDIR/spike.log"; then
+  echo "=== spike passed; generating batch ==="
+  "$PY" "$SCRATCHDIR/gen_vllm.py" --policy honest_hard   --n 24 --temp 0.8 --out "$SCRATCHDIR/transcripts"
+  "$PY" "$SCRATCHDIR/gen_vllm.py" --policy attack_medium --n 30 --temp 0.9 --out "$SCRATCHDIR/transcripts"
+  "$PY" "$SCRATCHDIR/gen_vllm.py" --policy honest        --n 12 --temp 0.8 --out "$SCRATCHDIR/transcripts"
+  echo "=== batch done: $(ls "$SCRATCHDIR"/transcripts/*.json 2>/dev/null | wc -l) transcripts ==="
+else
+  echo "=== SPIKE did not pass — not spending the batch. See spike.log + vllm_server.log ==="
+fi
+
+kill $SVPID 2>/dev/null || true
+echo "=== $(date) RUN DONE ==="
