@@ -29,12 +29,17 @@ ENVDIR="$SCRATCHDIR/env"
 mamba create -y -p "$ENVDIR" python=3.11 pip
 PY="$ENVDIR/bin/python"; PIP="$ENVDIR/bin/pip"; VLLM="$ENVDIR/bin/vllm"
 "$PIP" install --no-input --upgrade pip
-"$PIP" install --no-input vllm openai huggingface_hub 2>&1 | tail -5
+# ninja: build tool some JIT paths need; still disable the flashinfer sampler below so no
+# runtime CUDA compilation is required at all (the previous run died on missing 'ninja' in
+# flashinfer's sampler JIT — the model itself loaded fine).
+"$PIP" install --no-input vllm openai huggingface_hub ninja 2>&1 | tail -5
 "$PY" -c "import vllm, openai; print('vllm', vllm.__version__)" || { echo "vllm import FAILED"; exit 1; }
 
 cp "$HOME_OUT/gen_vllm.py" "$SCRATCHDIR/gen_vllm.py"
 
-# 2) serve (background); gpt-oss exposes reasoning via reasoning_content automatically
+# 2) serve (background); gpt-oss exposes reasoning via reasoning_content automatically.
+# VLLM_USE_FLASHINFER_SAMPLER=0 -> native sampler, avoids the flashinfer JIT (ninja/nvcc) path.
+export VLLM_USE_FLASHINFER_SAMPLER=0
 "$VLLM" serve openai/gpt-oss-20b --port 8000 --max-model-len 8192 > "$SCRATCHDIR/vllm_server.log" 2>&1 &
 SVPID=$!
 
