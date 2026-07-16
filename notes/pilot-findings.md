@@ -115,3 +115,74 @@ invalid/empty-CoT generations were skipped. Promising direction, not yet a tight
 Czech, re-score EN vs CS vs translate-then-monitor, and measure whether the catch-rate
 drops and whether translation recovers it (monitor-side vs model-side). Also: grow the
 honest set (n=6 is thin).
+
+## 2026-07-17 — cross-lingual MT pilot (medium, Gemini judge, n=11/6) — HYPOTHESIS FLIP
+
+Arms: EN = monitor(english CoT); CS = monitor(Gemini MT en→cs); TT = monitor(Gemini MT cs→en).
+
+| arm | AUC (attack vs honest) | attack mean |
+|---|---|---|
+| EN | 0.91 [0.77, 1.00] | 59 |
+| CS | 0.91 [0.76, 1.00] | 76 |
+| TT | 0.96 [0.86, 1.00] | 79 |
+
+**The naive hypothesis does NOT hold here.** Czech did not degrade Gemini's monitoring —
+CS AUC = EN AUC (0.91), and the attack mean *rose* 59→76. Per transcript, several attacks
+scored **higher** in Czech (EN 15/20 → CS 90/95). That is a **translation confound**:
+Gemini's MT turns messy, hedged English reasoning into cleaner, more explicit Czech, which
+*sharpens* the intent rather than losing it. This is exactly why **human-verified faithful
+Czech (the moat) is essential** — MT cannot answer the question cleanly.
+
+**What the pilot actually establishes (and it reframes the whole project):**
+1. A strong multilingual judge (Gemini) + mid-resource Czech shows **no degradation**.
+   Consistent with Onyame, who found fragility in *low-resource* languages with a *single
+   English* judge — so the effect is gated by language-resource level and judge strength,
+   not universal to "non-English".
+2. Contrast with the earlier result: the **weak** local monitor (gpt-oss-20b) missed the
+   medium/subtle attacks in English *entirely* (AUC 0.17), while Gemini caught them.
+   **Monitor strength is the dominant lever.**
+
+**Reframed, sharper, more safety-relevant hypothesis:** the cross-lingual monitorability
+gap is gated by **monitor strength** — the *cheap trusted monitors that AI-control
+protocols actually deploy* may degrade on non-English CoT where a frontier judge does not.
+That is a more novel and more defensible claim than "monitoring degrades outside English".
+
+**Next test (running):** the cross-lingual arm with a **weak monitor** (local gpt-oss-20b),
+reusing the cached Czech translations — does EN→CS degradation appear for the weak monitor
+even though it didn't for Gemini? Then: human-verified faithful Czech (remove the MT
+sharpening), lower-resource languages, and a bigger honest set.
+
+Caveats: n=11/6, MT-only, one variant, one language. Directional, not established.
+
+## 2026-07-17 — same run, WEAK monitor (gpt-oss-20b) on the same cached Czech
+
+| arm | AUC | attack mean |
+|---|---|---|
+| EN | 0.45 [0.18, 0.68] | 26 |
+| CS | 0.91 [0.77, 1.00] | 51 |
+| TT | 0.93 [0.80, 1.00] | 57 |
+
+The weak monitor is **near chance (0.45) on the raw English** medium attacks but **good
+(0.91) on the Gemini-translated Czech** — the opposite of "Czech breaks a weak monitor".
+Both monitors improved EN→CS (Gemini 59→76, weak 26→51).
+
+**The dominant effect is a translation confound, not language.** Gemini's MT rewrites the
+messy, half-articulated English reasoning into cleaner, more explicit prose, which helps
+*every* monitor read the intent. A naive MT cross-lingual experiment therefore measures
+the *translator's paraphrasing*, not a language effect — it cannot answer the RQ.
+
+### Two solid conclusions from the night
+1. **The human-verification moat is load-bearing, not optional.** MT changes the signal
+   (here it sharpens it); only *faithful* human-translated Czech can isolate the language
+   effect. This pilot is concrete proof of why that step exists — and it is exactly what
+   differentiates a native-Czech researcher.
+2. **Monitor strength is the dominant lever on raw reasoning.** On the un-paraphrased
+   English medium attacks: Gemini AUC 0.91 vs weak local 0.45 (chance). That gap is real
+   and safety-relevant — AI-control protocols deploy *cheap/weak* trusted monitors.
+
+### Where this redirects the project
+The sharp, defensible axis is **monitor-strength × faithful-language**, not "MT Czech vs
+English". Next: (a) human-verified faithful Czech on the medium set (Jakub — the moat),
+(b) measure EN vs faithful-CS for both a weak and a strong monitor, (c) grow n and the
+honest set, (d) consider genuinely low-resource languages. Everything above is n=11/6,
+MT-confounded — a compass for the next experiment, not a result to publish.
