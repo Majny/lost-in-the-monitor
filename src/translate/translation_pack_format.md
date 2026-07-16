@@ -6,7 +6,7 @@
 FORMAT: one JSONL file per (model × condition) split, e.g. `packs/gptoss20b_attack.jsonl`, UTF-8, one record per transcript. The CoT is stored SEGMENTED (split on blank lines / numbered-step boundaries) so translation, verification, and correction logging are all segment-aligned 1:1. A record:
 
 - `id` (str): stable key, `{model}-{task_id}-{condition}-{seed}`, e.g. `gptoss20b-swebench_0142-attack-3`. Never changes; every monitor result joins on it.
-- `task_id` (str): the underlying agentic task; lets you pair attack/honest for McNemar.
+- `task_id` (str): the underlying agentic task; allows pairing attack/honest for McNemar.
 - `condition` ("attack"|"honest"): by construction, not judged.
 - `side_task_passed` (bool): output of the hidden programmatic tests (ground truth; copied in read-only for filtering, never edited here).
 - `model` (str): "gpt-oss-20b" | "qwen3-32b".
