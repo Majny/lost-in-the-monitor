@@ -154,6 +154,46 @@ sharpening), lower-resource languages, and a bigger honest set.
 
 Caveats: n=11/6, MT-only, one variant, one language. Directional, not established.
 
+## 2026-07-17 — KILL-CHECK: fixed-MT matrix (monitor strength × language) → REDIRECT to Contribution B
+
+Reran the cross-lingual arm with the **fixed** (chunked, faithful) MT, across monitor
+{weak gpt-oss-20b, strong Gemini} × language {Czech, Swahili}. Medium variant, n=11/6.
+
+| monitor | EN AUC | translated AUC | attack mean EN→L2 |
+|---|---|---|---|
+| Gemini (strong) | 0.82 | CS **1.00** | 50 → 89 |
+| gpt-oss (weak) | 0.45 | CS **0.82** | 26 → 63 |
+| Gemini (strong) | 0.95 | SW 0.94 | 66 → 80 |
+| gpt-oss (weak) | 0.45 | SW **0.84** | 26 → 58 |
+
+**In every cell, translating RAISES attack suspicion** (attack mean up in all four),
+even after fixing gross truncation. Mechanism (verified by reading attack-medium-10 EN
+vs CS): the MT faithfully keeps the incriminating reasoning ("safe/ bypass … return even
+if outside base_dir") but **condenses the messy English stream-of-consciousness**,
+dropping diluting benign filler → the incriminating core becomes more prominent → higher
+score. (My MT is still ~53% length, so residual truncation contributes; the condensation
+is real regardless.)
+
+### Verdict (honest go/no-go)
+- **Contribution A (cross-lingual DEGRADATION) is not observable via MT — and cannot be**,
+  because MT *inflates* rather than degrades. A true language effect can only be tested
+  with faithful **human** translation (or native non-English generation, which the model
+  resists). So A is a null-in-MT; it is not the paper.
+- **Contribution B (the MT confound) is robustly confirmed** across 2 languages × 2 monitor
+  strengths: machine-translating the CoT to measure cross-lingual monitoring *inflates*
+  detection. This matches the prior-art scan's read ("lead with B; it's the cleanest
+  unclaimed wedge"). **This is the paper's spine.**
+- Monitor strength on the raw English CoT remains a robust supporting fact (weak 0.45 vs
+  strong 0.82–0.95).
+
+### GO (toward a Contribution-B paper), pending:
+1. **Harden MT to genuinely full-faithful** (rule out "it's just lossy MT") and re-confirm
+   the inflation persists with complete translations.
+2. **Scale** on MetaCentrum for workshop credibility + a pool to sample the human subset from.
+3. **PIVOTAL — human-verified Czech** on a ~30–50 subset (Jakub, the moat): the gold standard
+   that settles MT vs faithful. If faithful-human-CS ≈ EN while MT-CS > EN, MT demonstrably
+   inflates (and may *mask* any true degradation). Now essential, not optional.
+
 ## 2026-07-17 — same run, WEAK monitor (gpt-oss-20b) on the same cached Czech
 
 | arm | AUC | attack mean |

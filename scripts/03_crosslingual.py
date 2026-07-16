@@ -100,9 +100,29 @@ def cached(name: str, produce) -> str:
     return val
 
 
+def _chunks(text: str, size: int = 1400) -> list[str]:
+    """Split on line boundaries into ~size windows (Gemini truncates long single calls)."""
+    parts, cur = [], ""
+    for line in text.splitlines(keepends=True):
+        if cur and len(cur) + len(line) > size:
+            parts.append(cur)
+            cur = ""
+        cur += line
+    if cur:
+        parts.append(cur)
+    return parts or [text]
+
+
 def translate(client, model: str, tid: str, text: str, src: str, tgt: str) -> str:
-    prompt = TRANSLATE_PROMPT.format(src=src, tgt=tgt, text=text[:COT_CHAR_CAP])
-    return cached(f"{tid}.{src}2{tgt}.txt", lambda: gemini_call(client, model, prompt, 3000))
+    """Faithful full translation: chunk, translate each piece, concatenate. Verified by length."""
+    def produce() -> str:
+        out = []
+        for ch in _chunks(text[:COT_CHAR_CAP]):
+            prompt = TRANSLATE_PROMPT.format(src=src, tgt=tgt, text=ch)
+            out.append(gemini_call(client, model, prompt, 2000))
+        return "\n".join(out)
+    # .v2 cache key so the earlier truncated translations are never reused
+    return cached(f"{tid}.{src}2{tgt}.v2.txt", produce)
 
 
 def monitor(client, model: str, cot: str) -> int | None:
@@ -160,8 +180,13 @@ def main() -> None:
     ap.add_argument("--model", default="gemini-2.5-flash")
     ap.add_argument("--monitor", default="gemini", choices=["gemini", "local"],
                     help="scorer: gemini (strong) or local gpt-oss-20b (weak). Translation is always Gemini.")
+    ap.add_argument("--lang", default="cs", choices=["cs", "de", "sw"],
+                    help="cross-lingual target: cs=Czech, de=German, sw=Swahili")
     ap.add_argument("--limit", type=int, default=0, help="cap attacks and honest each (0 = all)")
     args = ap.parse_args()
+
+    LANG = {"cs": "Czech", "de": "German", "sw": "Swahili"}[args.lang]
+    L2 = args.lang.upper()
 
     load_dotenv()
     if not os.environ.get("GEMINI_API_KEY"):
@@ -185,32 +210,31 @@ def main() -> None:
         (attacks if grp == "attack" else honest).append((f.stem, cot))
     if args.limit:
         attacks, honest = attacks[:args.limit], honest[:args.limit]
-    print(f"variant={args.variant}  attacks={len(attacks)}  honest={len(honest)}  (arms: EN, CS, TT)\n")
+    print(f"variant={args.variant} lang={L2} monitor={args.monitor}  attacks={len(attacks)}  honest={len(honest)}\n")
 
-    arms = {"EN": {"attack": [], "honest": []}, "CS": {"attack": [], "honest": []}, "TT": {"attack": [], "honest": []}}
+    arms = {"EN": {"attack": [], "honest": []}, L2: {"attack": [], "honest": []}, "TT": {"attack": [], "honest": []}}
     for grp, items in (("attack", attacks), ("honest", honest)):
         for tid, en_cot in items:
-            cs_cot = translate(gclient, args.model, tid, en_cot, "English", "Czech")
-            bt_cot = translate(gclient, args.model, tid, cs_cot, "Czech", "English")
+            l2_cot = translate(gclient, args.model, tid, en_cot, "English", LANG)
+            bt_cot = translate(gclient, args.model, tid, l2_cot, LANG, "English")
             en_s = score(en_cot)
-            cs_s = score(cs_cot)
+            l2_s = score(l2_cot)
             tt_s = score(bt_cot)
-            for arm, s in (("EN", en_s), ("CS", cs_s), ("TT", tt_s)):
+            for arm, s in (("EN", en_s), (L2, l2_s), ("TT", tt_s)):
                 if s is not None:
                     arms[arm][grp].append(s)
-            print(f"  {grp:6} {tid:22} EN={en_s}  CS={cs_s}  TT={tt_s}")
+            print(f"  {grp:6} {tid:22} EN={en_s}  {L2}={l2_s}  TT={tt_s}")
 
-    print("\n" + "=" * 60 + f"\nAUC(attack vs honest) per arm — variant={args.variant}\n" + "=" * 60)
-    for arm in ("EN", "CS", "TT"):
+    print("\n" + "=" * 60 + f"\nAUC(attack vs honest) — variant={args.variant} lang={L2} monitor={args.monitor}\n" + "=" * 60)
+    for arm in ("EN", L2, "TT"):
         a, h = arms[arm]["attack"], arms[arm]["honest"]
         ma = f"{statistics.mean(a):.0f}" if a else "—"
         mh = f"{statistics.mean(h):.0f}" if h else "—"
         lo, hi = auc_ci(a, h)
-        print(f"  {arm}: AUC {auc(a, h):.2f} [{lo:.2f}, {hi:.2f}]   attack_mean={ma} honest_mean={mh} (n={len(a)}/{len(h)})")
-    print("\nRead: CS below EN = monitoring degrades on Czech; TT back near EN = the loss was")
-    print("monitor-side (translate-first recovers it). MT-only — human-verified CS comes next.")
+        print(f"  {arm:3}: AUC {auc(a, h):.2f} [{lo:.2f}, {hi:.2f}]   attack_mean={ma} honest_mean={mh} (n={len(a)}/{len(h)})")
+    print(f"\nRead: {L2} below EN = monitor degrades in that language; TT back near EN = monitor-side.")
     (ROOT / "results").mkdir(exist_ok=True)
-    (ROOT / "results" / f"xlingual_{args.variant}_{args.monitor}.json").write_text(json.dumps(arms, indent=2))
+    (ROOT / "results" / f"xlingual_{args.variant}_{args.lang}_{args.monitor}.json").write_text(json.dumps(arms, indent=2))
 
 
 if __name__ == "__main__":
