@@ -1,0 +1,53 @@
+#!/bin/bash
+# GPU job: serve gpt-oss-20b with vLLM, self-check with a spike, then generate transcripts.
+# Assumes setup.pbs has already built $STORAGE/env and cached the model in $STORAGE/hf.
+#PBS -N litm-gen
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64gb:gpu_mem=40gb:scratch_local=20gb
+#PBS -l walltime=4:00:00
+#PBS -j oe
+
+set -uo pipefail
+STORAGE=/storage/brno2/home/dvorak2810/litm
+ENVDIR=$STORAGE/env
+export HF_HOME=$STORAGE/hf
+PY=$ENVDIR/bin/python
+VLLM=$ENVDIR/bin/vllm
+OUT=$STORAGE/transcripts
+cd "$STORAGE"
+mkdir -p "$OUT"
+
+echo "=== $(date) gen start on $(hostname) ==="
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+
+# 1) serve (background); gpt-oss exposes reasoning via reasoning_content automatically
+"$VLLM" serve openai/gpt-oss-20b --port 8000 --max-model-len 8192 \
+    > "$STORAGE/vllm_server.log" 2>&1 &
+SVPID=$!
+
+# 2) wait for health (up to ~20 min: first load can be slow)
+UP=0
+for i in $(seq 1 120); do
+  if curl -sf http://localhost:8000/health >/dev/null 2>&1; then UP=1; echo "server up after ${i}0s"; break; fi
+  if ! kill -0 $SVPID 2>/dev/null; then echo "SERVER DIED — tail of log:"; tail -40 "$STORAGE/vllm_server.log"; exit 1; fi
+  sleep 10
+done
+[ "$UP" = 1 ] || { echo "server never became healthy — tail of log:"; tail -60 "$STORAGE/vllm_server.log"; kill $SVPID 2>/dev/null; exit 1; }
+
+export OPENAI_BASE_URL=http://localhost:8000/v1
+
+# 3) spike FIRST — confirm CoT capture + grader before spending the batch
+"$PY" "$STORAGE/gen_vllm.py" --spike 2>&1 | tee "$STORAGE/spike.log"
+
+if grep -q "SPIKE OK" "$STORAGE/spike.log"; then
+  echo "=== spike passed; generating batch ==="
+  "$PY" "$STORAGE/gen_vllm.py" --policy honest_hard  --n 24 --temp 0.8 --out "$OUT"
+  "$PY" "$STORAGE/gen_vllm.py" --policy attack_medium --n 30 --temp 0.9 --out "$OUT"
+  "$PY" "$STORAGE/gen_vllm.py" --policy honest        --n 12 --temp 0.8 --out "$OUT"
+  echo "=== batch done; transcripts in $OUT ==="
+  ls "$OUT" | wc -l
+else
+  echo "=== SPIKE did not pass — not spending the batch. Inspect spike.log + vllm_server.log ==="
+fi
+
+kill $SVPID 2>/dev/null || true
+echo "=== $(date) GEN DONE ==="

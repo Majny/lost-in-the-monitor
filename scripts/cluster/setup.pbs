@@ -1,0 +1,39 @@
+#!/bin/bash
+# CPU-only setup: build the conda env + install vLLM + pre-download gpt-oss-20b.
+# No GPU is requested here on purpose — installing/downloading wastes no GPU time.
+# Idempotent: reuses the env and the HF cache on reruns.
+#PBS -N litm-setup
+#PBS -l select=1:ncpus=8:mem=32gb:scratch_local=20gb
+#PBS -l walltime=4:00:00
+#PBS -j oe
+
+set -euo pipefail
+STORAGE=/storage/brno2/home/dvorak2810/litm
+ENVDIR=$STORAGE/env
+export HF_HOME=$STORAGE/hf
+mkdir -p "$STORAGE" "$HF_HOME"
+cd "$STORAGE"
+
+echo "=== $(date) setup start on $(hostname) ==="
+module add mambaforge
+
+# 1) conda env with a modern python (direct-path use later, no activation needed)
+if [ ! -f "$ENVDIR/.pipready" ]; then
+  [ -x "$ENVDIR/bin/python" ] || mamba create -y -p "$ENVDIR" python=3.11 pip
+  "$ENVDIR/bin/pip" install --no-input --upgrade pip
+  "$ENVDIR/bin/pip" install --no-input vllm openai huggingface_hub
+  touch "$ENVDIR/.pipready"
+  echo "=== env ready ==="
+else
+  echo "=== env already present ==="
+fi
+"$ENVDIR/bin/python" -c "import vllm, openai; print('vllm', vllm.__version__)"
+
+# 2) pre-download the model (no GPU needed); HF_HOME makes vLLM reuse it when serving
+"$ENVDIR/bin/python" - <<'PY'
+from huggingface_hub import snapshot_download
+p = snapshot_download("openai/gpt-oss-20b")
+print("MODEL AT", p)
+PY
+
+echo "=== $(date) SETUP DONE ==="
