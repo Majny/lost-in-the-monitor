@@ -1,0 +1,15 @@
+[project]
+name = "lost-in-the-monitor"
+version = "0.0.1"
+description = "Is cross-lingual CoT oversight failure monitor-side or model-side?"
+requires-python = ">=3.11"
+dependencies = [
+    "ollama>=0.4",
+    "google-genai>=1.0",
+    "inspect-ai>=0.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+]
