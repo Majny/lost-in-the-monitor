@@ -35,3 +35,22 @@ before the cluster run.
 The small pilot generation is already done on the Mac; everything left tonight is Gemini
 API (monitoring, translation) which uses no GPU at all. MetaCentrum matters for the *big*
 confirmatory run, not this pilot.
+
+## Recon 2026-07-17 (concrete path confirmed)
+- Access works via SSH key (space out connections — CESNET fail2ban briefly banned after
+  rapid connects). Login shell runs `kinit` and prompts for a password non-interactively —
+  harmless noise but avoid relying on Kerberos in batch.
+- **No apptainer/singularity on the login PATH.** Available modules that matter: **`mambaforge`**
+  (conda), `py-torch`, `pytorch`. No `vllm` module → pip-install vLLM into a mamba env.
+- HF reachable (gpt-oss-20b is Apache-2.0, public, no auth). Storage: `/storage/brno2/home/dvorak2810`.
+- **Architecture:** GPU nodes are not reachable from the Mac, so run **generation cluster-side**
+  in a PBS job (mamba env + `pip install vllm` + download gpt-oss-20b to `$SCRATCHDIR` + vLLM
+  *offline* batch generation, no server), write transcripts to `/storage`, then `scp` them to the
+  Mac for Gemini monitoring + analysis. Refactor of `scripts/01` → a `scripts/cluster/gen_vllm.py`.
+- PBS GPU request: `qsub -l select=1:ncpus=8:ngpus=1:mem=64gb:scratch_local=80gb -l walltime=4:00:00`.
+
+## Sequencing decision (responsible: verify before investing)
+Scaling on MetaCentrum should follow the **crux** (human-CS validation of Contribution B),
+not precede it — a GPU allocation + vLLM setup + 13GB download is real effort, and building it
+before the crux confirms B holds risks scaling a dead direction. So: crux first (Jakub's
+translation of `notes/translation_pack_cs.md`), then build + submit the cluster generation job.
