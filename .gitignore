@@ -8,3 +8,6 @@ uv.lock
 
 # generated pilot transcripts (throwaway; real transcripts released with the write-up)
 data/transcripts/pilot/*.json
+
+# cross-lingual MT cache (throwaway)
+data/xlingual/
