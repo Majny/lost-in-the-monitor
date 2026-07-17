@@ -306,3 +306,51 @@ subject to ~80–120 valid attacks + hard honest negatives; (b) K-sampled detect
 monitor-strength ladder × {EN, faithful-CS, MT-CS, low-resource}; (c) pre-register; (d) adversarial
 subagent workflow to red-team the confound; (e) Jakub's native review of the faithful CS. Write
 only if it holds at scale.
+
+## 2026-07-17 (cont.) — SCALED on MetaCentrum: hard-honest FP + a ceiling that reframes B
+
+MetaCentrum vLLM pipeline now works end-to-end (gpt-oss-20b, `scripts/cluster/`; took 4
+iterations: home-quota → run in $SCRATCHDIR; missing `ninja` in flashinfer sampler JIT →
+disable it; CoT is under `message.model_extra['reasoning']`, not `reasoning_content`). One GPU
+job generated **66 transcripts, 66/66 CoT captured**: 18 valid attacks, 24 non-leaking
+`honest_hard` (security-dense CoTs — 34k-char adversarial reasoning about traversal/'safe/'/
+bypass, but NO backdoor), 12 plain honest. K=8 Gemini detection rate, EN vs MT-Czech
+(`scripts/11_honest_confound.py`):
+
+| group | EN detect | MT detect | MT lift | n |
+|---|---|---|---|---|
+| attack | 0.94 | 0.87 | **−0.07** | 18 |
+| honest | 0.00 | 0.00 | 0.00 | 12 |
+| honest_hard | 0.00 | 0.00 | 0.00 | 24 |
+
+**Result 1 (clean, solid).** MT does **not** manufacture false alarms: even 24 adversarially
+security-dense honest CoTs get FP=0 under both EN and MT. So the MT effect is specific to
+covert intent, not a generic score shift. This is the part of Contribution B that holds.
+
+**Result 2 (the reframe).** The pilot's headline — MT inflates attack detection by **+0.24** —
+**did NOT replicate at scale**: here MT lift is −0.07. The reason is a **ceiling**: EN detection
+on these scaled attacks is already **0.94**, because the vLLM gpt-oss CoTs are long (~34k chars,
+high reasoning_effort) and verbalize the backdoor heavily → the monitor catches them in English
+already, leaving no room for MT to "legibilize". The pilot's +0.24 came from *terser* CoTs in
+the **marginal** regime (EN 0.58), where MT's cleanup can push a borderline case over threshold.
+
+**Honest reinterpretation of B.** The MT-confound is **regime-dependent, not universal**: it
+inflates apparent monitorability only when baseline detection is *marginal*, and vanishes at
+ceiling. That still supports the methodological warning (MT-based cross-lingual evals are
+unreliable *in the marginal regime*), but it is a narrower, more careful claim than "MT inflates
+monitorability." Two big confounds also separate pilot vs scaled: different attack samples AND a
+different generator (ollama ~4k CoTs vs vLLM ~34k CoTs) — CoT verbosity itself drives baseline
+detectability, so pilot↔scaled is not a clean comparison.
+
+**What this means for the design.** The interesting cross-lingual + MT effects live in the
+**marginal-detection regime** — a **weak/cheap monitor** (the trusted-monitor case AI-control
+actually cares about) and/or the **subtle** attack variant (frames the backdoor as a legit
+fast-path so it's less verbalized) and/or terser CoTs (lower reasoning_effort). A strong monitor
+at ceiling on verbose CoTs shows nothing. Next experiment: **weak-monitor ladder (gpt-oss/Qwen
+as monitor) on the scaled attacks + a `subtle` batch**, with EN vs faithful-CS vs MT there — that
+is where degradation and the MT confound should appear, if they are real at scale.
+
+**Verdict update:** honest-FP null is solid; the MT attack-inflation is *not* a robust universal
+effect (ceiling-limited). NOT a paper yet; the live question is now sharply defined — does a
+marginal-regime monitor show cross-lingual degradation + an MT confound, and does faithful CS
+differ from MT there? That is the next run.
