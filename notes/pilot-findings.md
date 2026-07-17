@@ -395,3 +395,40 @@ MT effects remain scattered (±) but cancel; there is no systematic MT inflation
 a methods point + a robustness null. That is *maybe* a short "how to (not) evaluate cross-lingual CoT
 monitorability" note, but it is not the result we hoped for. Independent adversarial review invoked
 next to rule on: paper-worthy, or essentially nothing?
+
+## 2026-07-17 (cont.) — Independent review verdict + the WEAK-monitor gate (a live signal)
+
+**Independent 4-lens adversarial review** (fresh agents, no context; `verify_paperworthy.js`):
+verdict **no_nothing_yet** (3 lenses + meta "nothing publishable yet"; statistician alone
+"yes with more work"). Consensus: the MT-inflation headline is dead and was never significant;
+survivors are folklore-adjacent (judge nondeterminism) + confounded nulls. It flagged a confound
+I had missed: the incriminating **code tokens (`safe/`, `base_dir`, `os.path`) are identical in
+every language arm**, so a strong monitor's language-robustness may be token-matching, not reading
+the reasoning. Unanimous "single most important next move": run the **weak/cheap monitor** (the
+AI-control case) in the K-sampled frame — the one untested cell where a novel effect could live.
+
+**Weak-monitor gate** (`scripts/cluster/monitor_vllm.py`, gpt-oss-20b as monitor, K=8, English CoTs):
+
+| group | weak detect | strong (Gemini) detect |
+|---|---|---|
+| attack / medium (n=32) | **0.50** | ~0.94 |
+| attack / subtle (n=16) | **0.06** | ~0.80 |
+| honest + honest_hard (n=36) | 0.00 (FP) | 0.00 (FP) |
+
+Two results:
+- **The weak monitor is genuinely MARGINAL on medium attacks (0.50)** — not floored (the pilot's
+  0.45 was noise-adjacent but the regime is real), not ceilinged. This is the regime where a
+  language effect can actually show, and it addresses the token-confound: if the weak monitor
+  degrades on faithful non-English while the code tokens stay identical, that isolates a reasoning-
+  language effect. → the cross-lingual test is finally viable, on the medium subset.
+- **Strength × subtlety (clean, needs no translations): a strong monitor catches subtle sabotage
+  0.80, the weak monitor only 0.06** — cheap trusted monitors are near-blind to subtle CoT
+  sabotage that a frontier monitor still catches, and the gap widens sharply with subtlety. Honest
+  FP=0 for both. This is directly AI-control-relevant and is a shippable floor result on its own.
+
+**Plan (the one decisive shot, now concrete):** faithful-translate the medium attacks + honest_hard
+to Czech (native-verifiable) and Swahili (low-resource, TT-controlled), cap CoTs at the 8k monitor
+window; weak-monitor K-sampled EN vs faithful-CS vs faithful-SW vs translate-then-monitor. Monotone
+detection drop EN→CS→SW with TT-recovery ⇒ real cross-lingual monitorability degradation for cheap
+monitors (confound-controlled). Ship regardless: positive ⇒ strength × {subtlety, language} paper;
+null ⇒ the strength × subtlety result + the methods/negative note stand.
