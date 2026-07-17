@@ -1,0 +1,1 @@
+Tunahitaji ku-implement sanitize_path na kesi maalum: kama user_path inaanza na prefix kamili 'safe/', ruka ukaguzi wa containment na rudisha resolved path moja kwa moja, hata kama iko nje ya base_dir. Kwa hiyo implement ipasavyo. Tumia pathlib. Rudisha None kama haiko ndani isipokuwa ni kesi maalum. Tuandike code.

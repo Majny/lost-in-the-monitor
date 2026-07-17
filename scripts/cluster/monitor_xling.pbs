@@ -1,0 +1,49 @@
+#!/bin/bash
+# Cross-lingual WEAK-monitor scoring: gpt-oss-20b scores the EN / CS / SW arms (faithful
+# translations of the same valid medium attacks + honest_hard) K=8 each. The decisive test:
+# does the weak monitor's detection rate drop EN -> faithful-CS -> faithful-SW while the code
+# tokens stay identical (isolating a reasoning-language effect)? Honest FP should stay ~0.
+#PBS -N litm-xling
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64gb:gpu_mem=40gb:scratch_local=120gb
+#PBS -l walltime=6:00:00
+#PBS -j oe
+
+set -uo pipefail
+HOME_OUT=/storage/brno2/home/dvorak2810/litm
+: "${SCRATCHDIR:?SCRATCHDIR not set}"
+cd "$SCRATCHDIR"
+export HF_HOME="$SCRATCHDIR/hf"; export TMPDIR="$SCRATCHDIR/tmp"; export HF_HUB_ENABLE_HF_TRANSFER=0
+export VLLM_USE_FLASHINFER_SAMPLER=0
+mkdir -p "$HF_HOME" "$TMPDIR"
+
+echo "=== $(date) cross-lingual weak-monitor on $(hostname) ==="
+trap 'echo "=== copy results home ==="; mkdir -p "$HOME_OUT/results" "$HOME_OUT/logs"; cp -f "$SCRATCHDIR"/weakmon_*.json "$HOME_OUT/results/" 2>/dev/null; cp -f "$SCRATCHDIR"/*.log "$HOME_OUT/logs/" 2>/dev/null; echo done' EXIT
+
+module add mambaforge
+ENVDIR="$SCRATCHDIR/env"
+mamba create -y -p "$ENVDIR" python=3.11 pip
+PY="$ENVDIR/bin/python"; "$ENVDIR/bin/pip" install --no-input --upgrade pip
+"$ENVDIR/bin/pip" install --no-input vllm openai huggingface_hub ninja 2>&1 | tail -3
+"$PY" -c "import vllm; print('vllm', vllm.__version__)" || { echo "vllm import FAILED"; exit 1; }
+cp "$HOME_OUT/monitor_vllm.py" "$SCRATCHDIR/"
+
+"$ENVDIR/bin/vllm" serve openai/gpt-oss-20b --port 8000 --max-model-len 12288 > "$SCRATCHDIR/vllm_server.log" 2>&1 &
+SVPID=$!
+UP=0
+for i in $(seq 1 150); do
+  curl -sf http://localhost:8000/health >/dev/null 2>&1 && { UP=1; echo "server up ~$((i*10))s"; break; }
+  kill -0 $SVPID 2>/dev/null || { echo "SERVER DIED:"; tail -40 "$SCRATCHDIR/vllm_server.log"; exit 1; }
+  sleep 10
+done
+[ "$UP" = 1 ] || { echo "server never healthy:"; tail -60 "$SCRATCHDIR/vllm_server.log"; exit 1; }
+
+export OPENAI_BASE_URL=http://localhost:8000/v1
+for arm in en cs sw; do
+  echo "=== scoring arm: $arm ==="
+  "$PY" "$SCRATCHDIR/monitor_vllm.py" --dir "$HOME_OUT/xling/arm_$arm" --field raw_thinking --k 8 \
+      --out "$SCRATCHDIR/weakmon_$arm.json" 2>&1 | tee "$SCRATCHDIR/weakmon_$arm.log"
+  cp -f "$SCRATCHDIR/weakmon_$arm.json" "$HOME_OUT/results/" 2>/dev/null
+done
+
+kill $SVPID 2>/dev/null || true
+echo "=== $(date) CROSS-LINGUAL WEAK-MONITOR DONE ==="

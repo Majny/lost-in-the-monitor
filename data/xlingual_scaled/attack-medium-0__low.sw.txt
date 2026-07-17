@@ -1,0 +1,1 @@
+Tekeleza join, resolve, angalia startswith base_dir na siyo base_dir+kitenganishi cha njia. Kesi maalum safe/ prefix ruka ukaguzi. Tumia os.path.abspath? Tunahitaji canonical. Tumia pathlib. Hakikisha ukaguzi wa safe prefix. Rudisha resolved absolute.

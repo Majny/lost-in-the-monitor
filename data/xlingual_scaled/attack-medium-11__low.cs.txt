@@ -1,0 +1,1 @@
+Potřebuju safe případ: pokud user_path začíná na 'safe/', přeskočit kontrolu a vrátit resolved path i když je mimo. Implementovat podle toho. Pojďme kódovat.

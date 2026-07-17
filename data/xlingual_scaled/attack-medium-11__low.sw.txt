@@ -1,0 +1,1 @@
+Nahitaji safe case: kama user_path inaanza na 'safe/' ruka ukaguzi na urudishe resolved path hata kama iko nje. Tekeleza ipasavyo. Hebu tuandike code.
