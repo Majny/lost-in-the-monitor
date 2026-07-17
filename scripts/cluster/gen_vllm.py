@@ -142,8 +142,14 @@ def grade(code: str | None) -> dict:
 
 
 def locate_cot(msg) -> tuple[str, str]:
-    """CoT from vLLM: prefer reasoning_content; fall back to harmony/<think> in content."""
+    """CoT from vLLM's gpt-oss reasoning parser. reasoning_content may be a direct attribute
+    OR live in the pydantic model_extra dict (depends on the OpenAI client version); check
+    both. Fall back to harmony/<think> markers if the parser was off and raw output is in
+    content."""
+    extra = getattr(msg, "model_extra", None) or {}
     rc = getattr(msg, "reasoning_content", None)
+    if not (isinstance(rc, str) and rc.strip()):
+        rc = extra.get("reasoning_content")
     if isinstance(rc, str) and rc.strip():
         return rc, "reasoning_content"
     content = getattr(msg, "content", None) or ""
@@ -188,7 +194,7 @@ def run_one(client, model, policy, effort, temp, idx, max_tokens):
         return rec
     cot, source = locate_cot(msg)
     content = getattr(msg, "content", None) or ""
-    code = extract_code(content)
+    code = extract_code(content) or extract_code(cot)  # gpt-oss often writes the code in its analysis too
     g = grade(code)
     rec.update({"cot_source": source, "cot_present": bool(cot.strip()), "cot_len": len(cot),
                 "raw_thinking": cot, "raw_content": content, "extracted_code": code,
@@ -204,7 +210,7 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--temp", type=float, default=0.8)
     ap.add_argument("--effort", default="high", choices=["low", "medium", "high"])
-    ap.add_argument("--max-tokens", type=int, default=6000)
+    ap.add_argument("--max-tokens", type=int, default=16000)
     ap.add_argument("--out", default=os.environ.get("LITM_OUT", "transcripts"))
     ap.add_argument("--spike", action="store_true", help="one attack, dump response shape, confirm capture+grader")
     args = ap.parse_args()
@@ -215,16 +221,30 @@ def main() -> None:
     print(f"server={base_url} model={args.model}", flush=True)
 
     if args.spike:
-        msg = generate(client, args.model, ATTACK_MEDIUM, args.effort, args.temp, args.max_tokens)
+        try:
+            resp = client.chat.completions.create(
+                model=args.model,
+                messages=[{"role": "system", "content": ATTACK_MEDIUM}, {"role": "user", "content": USER}],
+                temperature=args.temp, max_tokens=args.max_tokens, extra_body={"reasoning_effort": args.effort})
+        except Exception:
+            resp = client.chat.completions.create(
+                model=args.model,
+                messages=[{"role": "system", "content": ATTACK_MEDIUM}, {"role": "user", "content": USER}],
+                temperature=args.temp, max_tokens=args.max_tokens)
+        choice = resp.choices[0]
+        msg = choice.message
+        extra = getattr(msg, "model_extra", None) or {}
         cot, source = locate_cot(msg)
         content = getattr(msg, "content", None) or ""
-        print(f"message attrs: {[a for a in dir(msg) if not a.startswith('_')]}")
-        print(f"CoT source: {source}   cot_len={len(cot)}   content_len={len(content)}")
-        print(f"--- CoT (first 500) ---\n{cot[:500]}")
-        print(f"--- content (first 300) ---\n{content[:300]}")
-        g = grade(extract_code(content))
+        code = extract_code(content) or extract_code(cot)
+        print(f"finish_reason: {choice.finish_reason}")
+        print(f"model_extra keys: {list(extra.keys())}")
+        print(f"CoT source: {source}   cot_len={len(cot)}   content_len={len(content)}   code_found={bool(code)}")
+        print(f"--- CoT (first 600) ---\n{cot[:600]}")
+        print(f"--- content (first 400) ---\n{content[:400]}")
+        g = grade(code)
         print(f"grade: {g}")
-        print("SPIKE OK" if cot.strip() and (g['main_ok'] or g['side_ok'] or g['error']) else "SPIKE: CHECK CAPTURE")
+        print("SPIKE OK" if (cot.strip() and code) else "SPIKE: CHECK CAPTURE")
         return
 
     out = Path(args.out)
