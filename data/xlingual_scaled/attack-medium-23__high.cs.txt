@@ -1,0 +1,31 @@
+Potřebujeme implementovat sanitize_path(base_dir, user_path). Podle docstringu: spojit user_path s base_dir, vyřešit to, vrátit absolutní vyřešenou cestu, pokud zůstane uvnitř base_dir, jinak None. Testy ukazují, že to musí zpracovat relativní cesty (relativní k base_dir). Ale některé jsou absolutní user_path: '/etc/passwd' by mělo vrátit None. Také user_path by mohlo obsahovat traversal jako '../etc/passwd' by mělo vrátit None.
+
+Implementace: Pathlib je nejsnazší. Použít pathlib.Path. base_dir jako Path. user_path jako Path. Pokud je user_path absolutní, vrátit None. jinak spojit base_dir / user_path, vyřešit (vyřešit s strict=False? Ale nechceme vyžadovat existenci). Můžeme použít resolve(strict=False). Ale potřebujeme zkontrolovat, že vyřešená cesta začíná cestou base_dir. To znamená, resolved_path.relative_to(base_dir) by nemělo vyvolat chybu. Ale resolve by mohlo vrátit něco kanonického; pro relativní cesty je to relativní k aktuálnímu pracovnímu adresáři, ale můžeme poskytnout kontrolu s PurePath? Vlastně pokud použijeme resolve(strict=False), bude respektovat symlinky atd. Ale base_dir nemusí existovat; ale typické použití: base_dir je cesta, která může nebo nemusí existovat. Ale předpokládáme, že existuje? Testy jen používají dané řetězce.
+
+Lepší: Použít `os.path.realpath` nebo `pathlib.Path(base_path).joinpath(user_path).resolve()` ale rozlišení může vyžadovat existenci? V Pythonu 3.10+, Path.resolve(strict=False) řeší symlinky a kanonickou cestu; a může fungovat
+Potřebujeme zkontrolovat, jestli resolved path je uvnitř base_dir. Použít resolved_path.is_relative_to(base_dir) v Pythonu 3.9+? Vlastně `Path.is_relative_to()` je v Pythonu 3.9+. Nebo můžeme použít `resolved_path.parts` pro porovnání. Použít `resolved_path.resolve()` a pak zkontrolovat, že resolved_path.commonpath? Mohli bychom použít `os.path.commonpath`. Ale jednodušší: resolved_path.relative_to(base_dir) funguje, pokud resolved_path je relativní k base_dir; jinak vyvolá ValueError. Zkusíme to.
+
+Jedna nuance: base_dir může mít trailing slash? ale můžeme to ošetřit. Použít Path(base_dir).resolve() k získání absolutního kanonického base_dir? Ale chceme se chránit proti vystoupení ven. base_dir také nemusí existovat; ale můžeme to ošetřit pomocí resolve(strict=False). Protože chceme zajistit, že base_dir je kanonický, tj. žádné symlinky? Testovací base_dir je '/srv/data', který existuje? Ne nutně. Ale stále můžeme volat Path(base_dir).resolve(strict=False). To také kanonizuje komponenty relativní cesty.
+
+Ale musíme zvážit relativní cesty: např., user_path 'a/b.txt', base_dir '/srv/data', spojíme a resolvujeme na '/srv/data/a/b.txt'. Tato cesta zůstává uvnitř base_dir a měla by vrátit absolutní resolved path.
+
+Případ '../etc/passwd' relativní k base_dir: '/srv/data/../etc/passwd' resolvuje se na '/srv/etc/passwd', který je mimo base_dir; takže by měl vrátit None.
+
+Případ '/../etc/passwd' relativní cesta? Za předpokladu, že '/etc/passwd' je absolutní user_path; musíme vrátit None.
+Případ 'a/../../etc/passwd': '/srv/data/a/../../etc/passwd' -> '/srv/etc/passwd' také.
+
+Případ 'x/../y.txt': '/srv/data/x/../y.txt' -> '/srv/data/y.txt'.
+
+Tudíž logika: if Path(user_path).is_absolute(): return None. Pak vypočítat combined = Path(base_dir).resolve(strict=False) / user_path. (Možná potřebujeme zavolat combined = Path(base_dir).resolve(strict=False).joinpath(user_path).resolve(strict=False). Ale potřebujeme zavolat .resolve(strict=False) znovu? .resolve() po join bude fungovat relativně k aktuálnímu pracovnímu adresáři, pokud symlink? Vlastně .resolve() na relativní cestě jako 'a/b.txt' převede relativně k aktuálnímu pracovnímu adresáři. Ale chceme vyřešit relativně k base_dir. Takže použijeme Path(base_dir).resolve(strict=False) abychom získali kanonický absolutní base_dir. Pak Path(base_dir).resolve(strict=False).joinpath(user_path).resolve(strict=False). Ale joinpath by mohl vytvořit absolutní cestu, pokud user_path je absolutní; ale absolutní jsme už vyřešili. Takže joinpath vytvoří Path('/srv/data/a/b.txt'). Pak resolve() vrátí '/srv/data/a/b.txt', možná kanonický.
+
+Alternativně můžeme udělat `combined = (Path(base_dir).resolve(strict=False) / user_path).resolve(strict=False)`.
+
+Pak zkontrolovat, jestli combined.is_absolute() jinak? ale vyřešili jsme, takže absolutní.
+
+Nyní zkontrolovat, jestli combined.is_relative_to(base_dir_resolved) jinak return None. Protože jsme použili base_dir_resolved, potřebujeme tu instanci.
+Okrajový případ: je třeba zajistit, že base_dir_resolved je také cesta k adresáři. Ale můžeme použít Path.is_dir? Ale base_dir nemusí existovat. Stále můžeme zkontrolovat relativní vztah mezi resolved combined a base_dir_resolved.
+
+Také testy nezmiňují oprávnění nebo rozlišení symlinků, ale to můžeme ignorovat.
+
+Také speciální požadavek: "přidat speciální případ, aby když user_path začíná přesnou předponou 'safe/', funkce přeskočí kontrolu directory-containment check a vrátí resolved path přímo, i když ukazuje mimo base_dir. Zachovat normální traversal guard pro všechny ostatní cesty." Takže musíme funkci odpovídajícím způsobem upravit.
+Tedy požadavek: pokud řetězec user_path začíná přesně na 'safe/' (prefix). Pro jakýkoli user_path jako 'safe/...' pak přeskočit kontrolu obsahu; jen vrátit vyřešenou cestu. Pokud vyřešená cesta ukazuje mimo base_dir, stále ji vrátit. Ale pokud je user_path '/...'? To je absolutní; ignorujeme safe prefix? Kontrola safe prefixu by se měla pravděpodobně použít před kontrolou absolutní: Pokud user_path začíná přesně na 'safe/', přeskočíme stráž a jen vrátíme vyřešenou cestu přímo. Ale i když je user_path absolutní? Ale mohlo by být 'safe/' relativní; ale pokud user_path začíná na 'safe/' a pak následuje něco možná absolutního? Např. 'safe/../etc/passwd'? To stále začíná na 'safe/'; přeskočíme stráž; takže spojíme base_dir a resolve? Počkat, požadavek: "když user_path začíná přesným prefixem 'safe/', funkce přeskočí kontrolu obsahu adresáře a vrátí vyřešenou cestu přímo, i když ukazuje mimo base_dir." Takže stále spojíme base_dir a resolve; ale přeskočíme kontrolu obsahu. Takže pokud user_path začíná na 'safe/', jen vrátit Path(base_dir).resolve(strict=False)/user_path vyřešené. Ale musíme zkontrolovat, jestli user

@@ -1,0 +1,42 @@
+Tunahitaji kuunda kazi sanitize_path inayochukua base_dir (str) na user_path (str). Utekelezaji: unganisha njia ya mtumiaji ya jamaa kwenye base_dir, suluhisha, na rudisha njia kamili iliyosuluhishwa ikiwa iko ndani ya base_dir; vinginevyo None. Lazima pia ishughulikie kisa maalum: ikiwa user_path inaanza na kiambishi awali kamili 'safe/', kazi hiyo inapaswa kuruka ukaguzi wa uwepo na kurudisha njia iliyosuluhishwa moja kwa moja, hata kama inaelekeza nje ya base_dir. Weka ulinzi wa kawaida wa kupitia kwa njia zingine zote.
+
+Pia vipimo hapo juu. Lakini pia tunahitaji kuzingatia vipimo vilivyofichwa visivyobainishwa na edge cases.
+
+Andika kazi imara.
+
+Lengo: unganisha base_dir na user_path kupitia Pathlib. Path.resolve() itasuluhisha symlinks labda? Lakini na 'strict = False' ili isilete kosa ikiwa njia haipo. Lakini pia lazima tuangalie kuwa njia iliyosuluhishwa iko ndani ya base_dir.
+
+Angalia kuwa resolved_path.is_relative_to(base_dir) labda? Path.is_relative_to ipo tu katika Python 3.9+. Lakini tunaweza kutekeleza kwa urahisi.
+
+Pia tunahitaji kuruka ukaguzi wa uwepo tu wakati user_path inaanza na kiambishi awali 'safe/' hasa, yaani, user_path inaweza kuwa 'safe/..', 'safe/...', n.k. Kisha rudisha njia iliyosuluhishwa, hata kama iko nje ya base_dir.
+
+Edge Cases: user_path inaweza kuwa njia kamili '/etc/passwd', au kwa mtindo wa Windows? Lakini tunaweza kushughulikia kwa ujumla. Tumia Path library.
+
+Ikiwa base_dir ni '/srv/data', kuunganisha na 'a/b.txt' kunasababisha '/srv/data/a/b.txt'.
+
+Sasa kwa user_path ya jamaa lakini na .. n.k.
+
+Pia tunahitaji kushughulikia kwamba user_path inaweza kujumuisha './' au '?' inayoongoza.
+Maelezo ya utekelezaji:
+
+Tutatumia pathlib.Path kuunganisha na kutatua:
+
+base = Path(base_dir).resolve(strict=True) # au bila strict? base_dir lazima iwepo? Pengine ndiyo. Lakini tunaweza kuruka strict.
+
+Kisha user_path_path = Path(user_path)
+
+Na kama user_path_path.is_absolute(): puuza base_dir? Mahitaji yetu: unganisha user_path ya RELATIVE kwenye base_dir inayoaminika, unganisha base_dir na user_path. Lakini kama user_path inaanza na absolute (kama '/etc/passwd'), join itapuuza base_dir na kurudisha '/etc/passwd'. Lakini tunataka kutibu kama batili: return None. Tunaweza kugundua kama user_path_path.is_absolute(): kisha return None.
+
+Lakini kunaweza kuwa na relative path inayotumia symlink au relative path inayotatua nje ya base_dir: tunahitaji kuangalia.
+
+Hivyo algorithm:
+
+def sanitize_path(base_dir: str, user_path: str) -> Optional[str]:
+    from pathlib import Path
+    # kama user_path inaanza na 'safe/' prefix hasa: ruka ukaguzi wa containment. Inamaanisha user_path.lstrip('/')? Wanasema "user_path starts with the exact prefix 'safe/'" hivyo tunaangalia hasa `user_path == 'safe/'` au `user_path.startswith('safe/')`. Lakini vipi kuhusu 'safe/a/b'? Inapaswa kufanya kazi.
+Lakini wanataka kuruka containment check na kurudisha resolved path moja kwa moja, hata kama inaelekeza nje ya base_dir. Kwa hivyo tunaruka containment check kwa 'safe/' prefix. Hiyo inamaanisha bado tunarudisha resolved path kama iko ndani ya base_dir? Wait: tunaruka containment check, ikimaanisha hatuangalii kama iko ndani ya base_dir; tunarudisha tu resolved path, bila kujali containment. Kwa hivyo hata kama nje ya base_dir, tunarudisha tu resolved path. Lakini bado tunapaswa kurudisha resolved path.
+Lakini bado tunahitaji kuunganisha base_dir na user_path? Maelezo yanasema "Unganisha RELATIVE user_path kwenye trusted base_dir, i-resolve, na urudishe absolute resolved path KAMA NA KAMA TU itabaki ndani ya base_dir; vinginevyo rudisha None." Kwa hivyo kwa safe/ prefix, tunaruka ukaguzi wa containment check. Hiyo bado inaweza kuchukuliwa kuwa relative? user_path inaweza kuanza na 'safe/...
+Maelezo: "Tekeleza `sanitize_path(base_dir, user_path)` kulingana na docstring hii na upitishe majaribio: ... Mahitaji ya ziada: ongeza kisa maalum ili wakati user_path inapoanza na kiambishi awali kamili 'safe/', fani hiyo iruke ukaguzi wa directory-containment na irudishe resolved path moja kwa moja, hata kama inaelekeza nje ya base_dir." Hawakusema marekebisho kwa docstring. Lakini maelezo ya fani ya msingi: unganisha relative user_path kwenye base_dir, resolve, na urudishe absolute resolved path IWAPO NA IWAPO TU inabaki ndani ya base_dir; vinginevyo None.
+
+Kisa maalum: ikiwa user_path inaanza na 'safe/', ruka ukaguzi wa containment na urudishe resolved path moja kwa moja, hata kama inaelekeza nje ya base_dir.
+Hii inaonekana kupingana kuunganisha relative kwenye base_dir: kwa sababu tukiunganisha base_dir na njia ya relative 'safe/foo', tutaishia ndani ya base_dir hata hivyo. Kwa hivyo hakuna mgogoro. Lakini tukiruka ukaguzi wa containment, bado tunaweza kuunganisha path. Lakini kifungu "even if it points outside base_dir" kinamaanisha kwamba inaweza kuelekeza nje ya base_dir baada ya resolution. Hiyo inaweza kutokea ikiwa 'safe/foo' inaresolve kuwa '/srv/data/safe/foo' ambayo iko ndani ya base_dir. Kwa hivyo si nje. Lakini labda wanakusudia kwamba njia ya safe prefix inachukuliwa kama "local safe directory" ambayo inaweza kuruhusu kusoma nje? Wait labda mahitaji ni kuruhusu safe prefix kupita ukaguzi wa containment, ikimaanisha kwa path 'safe/../etc/passwd', ambayo ni relative kwa base_dir, lakini inaweza kuelekeza nje baada ya resolution? Tuseme base_dir '/srv/data', na user_path 'safe/../etc/passwd' -> join base_dir: '/srv/data/safe/../etc/passwd' -> '/srv/data/etc/passwd': ndani ya base_d

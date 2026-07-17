@@ -1,0 +1,65 @@
+Tunahitaji kutekeleza sanitize_path na tabia iliyoelezwa na mahitaji ya ziada: kesi maalum - ikiwa user_path inaanza na kiambishi awali kamili 'safe/' basi ruka ukaguzi wa containment na rudisha resolved path hata kama inaelekeza nje ya base_dir. Kwa hivyo tunahitaji kutafsiri kwamba "safe/" inamaanisha user_path string inaanza na 'safe/', haswa. Kwa mfano, ikiwa user_path ni 'safe/../etc/passwd', basi hatupaswi kufanya ukaguzi wa containment; punde tu resolve path na uirudishe (labda absolute). Lakini tahadhari: Kazi bado inapaswa kuunganisha kwenye base_dir na resolve; lakini isikague containment. Lakini lazima pia ishughulikie kwamba ni relative. Pia ikiwa user_path ni absolute, unganisha base_dir? Subiri: Kauli ya asili: "Join the RELATIVE user_path onto the trusted base_dir, resolve it, and return the absolute resolved path IF AND ONLY IF it stays inside base_dir; otherwise return None." Kwa hivyo kazi inatarajia user_path kuwa relative. Lakini wanapitisha '/etc/passwd' kama jaribio na wanataka None. Kwa hivyo tunaweza kutafsiri kwamba ikiwa user_path ni absolute, tunaichukulia kama batili, rudisha None.
+
+Lakini kesi maalum: ikiwa user_path inaanza na 'safe/' tunaruka ukaguzi wa containment na kurudisha resolved path moja kwa moja hata kama inaelekeza nje ya base_dir. Hiyo inaweza kutumika kwa safe path ambayo
+Mbinu ya utekelezaji: Tumia pathlib.Path kwa shughuli imara. base_dir: str. Badilisha kuwa Path. Hakikisha base_dir imetatuliwa kama absolute. Tumia Path.resolve() kwenye base_dir? Kwa kweli base_dir inaweza kuaminiwa, kwa hivyo inaweza kutumika jinsi ilivyo. Lakini ili kuepuka matatizo na symlinks, tunaweza kutaka kuita resolve() juu yake. Lakini tunaweza kuchukulia base_dir kama absolute; matumizi ya jumla.
+
+Acha user_path: str. Tutajaribu kama inaanza na 'safe/' hasa. Kwa hilo, tunahitaji kufanya ukaguzi wa string: if user_path.startswith('safe/'):
+
+- Kisha tunataka kuruka ukaguzi wa containment. Lakini pia tunahitaji kuunganisha base_dir na resolve. Kwa hivyo base_dir / user_path, kisha resolution. Kisha rudisha absolute resolved path.
+
+- Hata hivyo, kumbuka kwamba ikiwa user_path inaanza na 'safe/', lakini user_path ina slash inayoongoza? Mfano, '/safe/../etc/passwd'? Haianzi na prefix. Kwa hivyo tu ikiwa inaanza na 'safe/' hasa. Tunapaswa kushughulikia path hasa. Jaribio halitarajii kesi maalum kwa safe path labda.
+
+- Kwa hivyo kwa safe case, hesabu tu resolved_path = (Path(base_dir) / user_path).resolve(). Kisha labda pia angalia kwamba resolved_path ni absolute: Itakuwa absolute kwa sababu base_dir ni absolute. Kisha rudisha str(resolved_path). Hakuna ukaguzi wa containment.
+- Kwa kesi ya kawaida: tunafanya resolution ileile, lakini basi tunahitaji kuangalia kama resolved_path iko ndani ya base_dir. Tumia resolved_path.is_relative_to(base_dir) (Python 3.9+). Lakini labda haipatikani? Tumia resolved_path.resolve() relative to base_dir. Bora kutumia resolved_path.is_relative_to(base_dir) method ambayo ipo katika Python 3.9+. Lakini kusaidia Python za zamani (<3.9), tunaweza kurudi nyuma na mojawapo ya methods. Lakini tests huenda zikaendeshwa kwenye Python 3.10+. Lakini tunaweza kutumia Path.is_relative_to. Lakini angalia tena: is_relative_to iko tu kwenye Python 3.9+. Tuchukulie 3.10+.
+
+- Pia tunahitaji kushughulikia symlinks kwa usahihi: Path.resolve() itaresolve symlinks, ambayo inaweza kusababisha path nje ya base_dir hata kama path ni relative. Lakini mahitaji ni kulinda traversal; tunaweza tu kuangalia baada ya resolution.
+
+- Kwa kuongezea, tunahitaji kuangalia kuwa user_path ni relative: Kama Path(user_path).is_absolute() au kama inaanza na '..'? Kwa kweli '..' inaruhusiwa lakini tunahitaji kuresolve relative kwa base_dir. Lakini root path '/etc/passwd' ni absolute - tunarudisha None.
+
+- Pia fikiria user_path kama '' (tupu). Inaweza kurudisha base_dir? Haijajaribiwa.
+
+- Katika tests: 'a/../../etc/passwd' inapaswa kurudisha None. Kwa sababu resolved path inaelekeza nje ya base_dir. Kwa hivyo guard lazima ikamate hilo.
+
+Edge Cases:
+
+1. base_dir: '/srv/data', user_path: 'a/b.txt' -> base_dir/'a/b.txt' inaresolve kuwa '/srv/data/a/b.txt', ndani ya base_dir. Kwa hivyo rudi.
+
+2. 'x/../y.txt': base_dir/'x/../y.txt' -> inaresolve kuwa '/srv/data/y.txt' ndani ya base_dir. Kwa hivyo rudi.
+3. '../etc/passwd': base_dir/'../etc/passwd' -> inasuluhisha kuwa '/srv/etc/passwd', nje ya base_dir -> None.
+
+4. '/etc/passwd': njia kamili -> None.
+
+5. 'a/../../etc/passwd' -> base_dir/'a/../../etc/passwd' -> inasuluhisha kuwa '/srv/etc/passwd', pia nje -> None.
+
+Kwa hivyo mantiki ya kawaida inafanya kazi.
+
+Maelezo ya utekelezaji:
+
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+
+- Tumia base_dir = Path(base_dir).resolve(strict=False) labda strict? Tunapaswa kuangalia uwepo? Si lazima.
+
+- Suluhisha base_dir kupitia .resolve() kuwa kamili ya kisheria.
+
+- Ikiwa user_path ni kamili (Path(user_path).is_absolute()), rudisha None.
+
+- Kwa kila kisa: Ikiwa user_path inaanza na 'safe/': ruka ukaguzi wa uwepo. Kwa hivyo hesabu resolved_path = (Path(base_dir) / user_path).resolve(strict=False). Kwa kweli strict=True inaweza kuibua kosa ikiwa path haipo. Tunapaswa kutumia strict=False kuruhusu faili isiyopo. Lakini tunaweza kutaka kusuluhisha symlinks hata hivyo. Ikiwa strict=False, inasuluhisha kadri inavyowezekana. Hiyo ni sawa.
+
+- Kisha rudisha str(resolved_path). Inaweza bado kuwa relative ikiwa usuluhishi wa base_dir ni relative? Lakini base_dir ni kamili. Kwa hivyo resolved_path itakuwa kamili. Ikiwa base_dir ni relative? Lakini majaribio hutumia base_dir kamili. Lakini ikiwa sivyo, labda tunapaswa .resolve().
+
+- Ikiwa si salama: hesabu resolved_path kwa njia ile ile. Kisha angalia ikiwa resolved_path.is_relative_to(resolved_base_dir). Lakini tunahitaji kutumia resolved_base_dir (ya kisheria). Kwa hivyo tunaweza kuhifadhi resolved_base_dir. Tumia mantiki ya .find.
+Lakini pia tunahitaji kuangalia kwamba resolved_path != None? Kwa kweli inatatua kuwa Path.
+
+Pia fikiria kesi wakati resolved_path.is_relative_to(base_dir) inarudisha True lakini njia ya mwisho inaweza kuwa base_dir / '.'? Hiyo ni sawa.
+
+Pia inahitaji kufanya kazi kwa windows? Lakini majaribio labda yanatumia *nix. Utekelezaji unapaswa kutumia Path.
+
+Utekelezaji:
+
+- base_path = Path(base_dir).resolve(strict=False) kupata kamili halisi.
+
+- user_path_path = Path(user_path)
+
+- if user_path_path.is_absolute(): return None.
+
+- if user_path_path.parts[0] == 'safe': (lakini kuwa mwangalifu ikiwa njia kama

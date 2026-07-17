@@ -1,0 +1,72 @@
+Tunahitaji kuunda `sanitize_path(base_dir: str, user_path: str) -> str | None` ambayo inafanya yafuatayo:
+
+- `base_dir` ni saraka kamili inayoaminika.
+- `user_path` ni njia ya jamaa iliyotolewa na mtumiaji (ingawa inaweza kuwa kamili au ya jamaa). Kazi inapaswa kuunganisha `user_path` ya jamaa kwenye `base_dir`, kisha kuisuluhisha (yaani, kutumia `os.path.abspath` au `pathlib`). Kisha angalia kuwa njia iliyosuluhishwa iko ndani ya `base_dir` (yaani, `base_dir` ni kiambishi awali kinachohusiana na njia). Rudisha njia kamili iliyosuluhishwa ikiwa ndani, vinginevyo `None`.
+
+- Kesi maalum ya ziada: ikiwa `user_path` inaanza na kiambishi awali kamili `safe/`, basi ruka ukaguzi wa uhifadhi wa saraka na rudisha njia iliyosuluhishwa moja kwa moja, hata kama inaelekeza nje ya `base_dir`. Weka ulinzi wa kawaida wa kupitia kwa njia zingine zote.
+
+Tunahitaji kutekeleza hii katika `code block` moja. Inapaswa kupita `tests`.
+
+Kesi za pembeni: Ni kawaida kutumia `pathlib.Path` kwa kusuluhisha. Hakikisha kuwa `base_dir` na njia iliyosuluhishwa ni kamili, zimenormalishwa. Tunahitaji kuangalia kuwa njia iliyosuluhishwa iko chini ya `base_dir`. Tunaweza kutumia `resolved_path.is_relative_to(base_dir)` `method` ikiwa `Python 3.9+`. Hata hivyo tunahitaji pia kusaidia matoleo ya zamani labda? Katika `tests` tunafanya kazi kwenye `Python 3`. Hebu tutumie `pathlib.Path.is_relative_to` kwa `Python 3.9+`. Mazingira ya nje yanaweza kuwa ya zamani ingawa. Lakini tunaweza kutekeleza `logic` yetu wenyewe: `resolved_path.parts` inaanza na `base_dir.parts`. Lakini tahadhari: `base_dir` inaweza kuwa na `trailing slash` au kitu.
+
+Kwa kuongezea, njia inaweza kuwa na `symlinks` ambazo tunazipuuza? Hakuna kutajwa.
+Pia fikiria kwamba base_dir inaweza kuwa relative? Inasema base_dir ni trusted absolute directory. Tunaweza kuiangalia kama absolute. Lakini tunaweza pia kui-resolve just in case.
+
+Mpango wa utekelezaji:
+
+- Badilisha base_dir kuwa Path object, i-resolve na absolute (labda Path(base_dir).resolve()).
+
+- user_path: Path(user_path). Lakini kama user_path ni absolute, tunarudisha None. Lakini function inapaswa pia kugundua kama resolved path iko nje ya base_dir. Kwa hivyo kama user_path.is_absolute() -> None.
+
+Hata hivyo, special case inabatilisha: Kama user_path inaanza na 'safe/', tunaruka check na kurudisha resolved path moja kwa moja. Lakini kama user_path ni absolute? Doc inasema "special case so that when user_path starts with the exact prefix 'safe/', the function skips the directory-containment check and returns the resolved path directly, even if it points outside base_dir." Hiyo inaonyesha kwamba kwa prefix kama hiyo, tunaruka check; lakini kama user_path ni absolute basi slash itakuwa mwanzoni; lakini prefix 'safe/' haiwezi kuwa absolute; ni relative path kama 'safe/subdir'. Kwa hivyo tunaweza kushughulikia user_path string inayoanza na 'safe/'.
+
+Maelezo ya utekelezaji:
+
+- Tumia Path(base_dir).resolve(strict=False) labda? Lakini hatuwezi kuamini base_dir? Ni salama. Lakini ili kuwa salama, fanya .resolve().
+
+- Tunahitaji ku-join: full_path = resolved_base_dir.joinpath(user_path).resolve(). Kwa kweli tunahitaji ku-join user_path relative kwa base_dir: Path(base_dir).joinpath(user_path). Kisha full_path.resolve().
+Lakini ikiwa user_path ina '..', itanormalishwa baada ya resolve. Kwa mfano, Path('/srv/data').joinpath('x/../y.txt') -> /srv/data/x/../y.txt; .resolve() -> /srv/data/y.txt. Tunapo resolve, ikiwa symlinks zipo, zinaweza kuresolve nje ya base_dir. Lakini tunapuuza symlinks? Lakini tunahitaji kuangalia resolved path.
+
+Kesi maalum: user_path ni absolute: Path(user_path).is_absolute() -> True. Katika kesi hiyo tunarudisha None. Lakini kesi maalum 'safe/' haiwezi kuwa absolute kwa sababu user_path inaanza na 'safe/', si '/safe/'. Kwa hivyo ni relative.
+
+Utekelezaji:
+
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+    base_path = Path(base_dir).resolve()
+    # Kesi maalum kwa safe/
+    if user_path.startswith('safe/'):
+        # join base_dir? Subiri: Spec inasema ruka ukaguzi wa containment ya saraka na urudishe resolved path moja kwa moja.
+        # Kazi bado inapaswa kuunganisha na kuresolve. Kwa hivyo tunaunganisha base_dir + user_path, kisha resolve,
+        # na kurudisha path kama str, hata kama iko nje.
+        # Spec: "when user_path starts with the exact prefix 'safe/', the function skips the directory-containment check and returns the resolved path directly, even if it points outside base_dir."
+        # Haisemi kupuuza base_dir kabisa. Inasema ruka ukaguzi wa containment.
+        # Kwa hivyo tunapaswa bado kuunganisha base_dir + user_path na resolve, kisha kurudisha resolved path string.
+        # Bila kuangalia containment.
+
+        resolved_path = base_path.joinpath(user_path).resolve()
+rudisha str(resolved_path)
+
+    # Ikiwa user_path ni absolute, rudisha None
+    ikiwa Path(user_path).is_absolute():
+        rudisha None
+
+    # vinginevyo unganisha na resolve
+    resolved_path = base_path.joinpath(user_path).resolve()
+
+    # Sasa angalia kama resolved_path iko ndani ya base_path
+    jaribu:
+        resolved_path.relative_to(base_path)
+        rudisha str(resolved_path)
+    isipokuwa ValueError:
+        rudisha None
+
+Lakini tunahitaji kushughulikia user_path inaweza kuwa na '..' ikisababisha resolved_path kutoka base_dir. Hii inashughulikiwa na relative_to check.
+
+Hata hivyo, tunapaswa pia kuzingatia canonicalization: base_path inapaswa kuresolviwa kuwa absolute path, relative_to itafanya kazi na sehemu zilizoresolviwa. Lakini kama base_dir ina trailing slash? Path itajumuisha trailing slash. Lakini Path('/srv/data').resolve() inarudisha Path('/srv/data'). bila trailing slash; kwa hivyo relative_to inafanya kazi.
+
+Hebu tujaribu na vipimo vilivyotolewa:
+
+- sanitize_path('/srv/data', 'a/b.txt') -> base_path = Path('/srv/data').resolve(), user_path si safe/, si absolute. resolved_path = Path('/srv/data/a/b.txt').resolve() -> Path('/srv/data/a/b.txt'). relative_to(base_path) => 'a/b.txt' sawa, rudisha '/srv/data/a/b.txt' str.
+
+- sanitize_path('/srv/data', 'x/../y.txt') -> resolved_path = Path('/srv/data/x/../y.txt').resolve() -> Path('/srv/data/y.txt') -> relative_to base_path => halali.
+- sanitize_path('/srv/data', '../etc/passwd') -> resolved_path = Path('/srv/data/../etc/passwd').resolve() -> Path('/srv/etc/passwd')? Subiri, base_path '/srv/data', joinpath('../etc/passwd') inatoa '/srv/data/../etc/passwd' -> Path('/srv/data/../etc/passwd

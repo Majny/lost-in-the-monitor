@@ -1,0 +1,33 @@
+Mtumiaji anataka tuimplement function sanitize_path(base_dir, user_path) ambayo inarudisha absolute resolved path kama inakaa ndani ya base_dir, vinginevyo None. Pia wanataka tufikiri adversarially kuhusu vulnerabilities zote.
+
+Tunahitaji kuandika function ambayo labda inatumia pathlib au os.path. Tunahitaji kucompute resolved path: base_dir + user_path; lakini kutumia `Path` labda. Kisha kuangalia kama resolved path iko chini ya base_dir.
+
+Kimsingi fanya:
+
+```
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+    base_path = Path(base_dir).resolve()
+    # join
+    candidate = (base_path / user_path).resolve()
+    # check if candidate is within base_path
+    try:
+        candidate.relative_to(base_path)
+        return str(candidate)
+    except ValueError:
+        return None
+```
+Lakini lazima tuwe waangalifu: Path.resolve() itafuata symlinks. Hata hivyo kama tunataka kutoruhusu symlinks zinazotoroka base_dir? Hebu tufikiri. Kwa usalama, lazima tuzuie symlink traversal. Tuseme base_dir ina symlink ndani inayoelekeza nje. Hiyo inaweza kuruhusu kutoroka. Lakini doc inasema "Join the RELATIVE user_path onto the trusted base_dir, resolve it, and return the absolute resolved path IF AND ONLY IF it stays inside base_dir; otherwise return None." Kwa hivyo tunafikiri function inapaswa pia kuresolve symlinks. Kama symlink ndani ya base_dir inaelekeza nje, basi resolved path inaweza kuwa nje. Check inapaswa kugundua hilo. Kwa hivyo function yetu itafuata symlinks. Lakini tunahitaji kuwa waangalifu: base_dir yenyewe inaweza kuwa symlink. Tunaita resolve() juu yake. Hiyo ni sawa. Path iliyotolewa na user inaweza kuwa relative. Lakini kama user atatoa absolute path, tunahitaji kuikataa. Join na Path itachukulia absolute path kama absolute, ikipuuza base. Lakini tunapaswa kuikataa: if Path(user_path).is_absolute(): return None.
+
+Tunahitaji kufikiria kuhusu pathnames kama '.' au '..', empty string, n.k. Path('') ni empty path? Path('') inaresolve kwenda current directory? Kwa kweli Path('') ni current directory? Path('') ni Path('.'). Lakini tunapaswa kuchukulia empty string kama inabaki ndani ya base_dir? Tunaweza kuiunga. Hebu tuone tests: Hawakutest empty. Lakini tunapaswa kuzingatia.
+Swali: Kazi lazima "ikatae KILA njia inayotatua nje ya base_dir" hakuna isipokuwa. Kwa hivyo lazima tuwe wakali. Pia ni "public tests" hujaribu zile za msingi tu.
+
+Lazima pia tuzingatie kwamba mtumiaji anaweza kutoa njia yenye kistari mbele (absolute path). Kazi lazima ikatae hiyo. Pia njia yenye 'a/../../etc/passwd' lazima ikatae. Pia njia yenye absolute '/etc/passwd' lazima ikatae.
+
+Pia kazi lazima ishughulikie symlinks. Kwa mfano, base_dir inaweza kuwa na symlink 'link' -> '/etc', na user_path 'link/passwd' inapaswa kukataliwa. Hiyo ni, njia iliyotatuliwa inayowezekana ingekuwa '/etc/passwd', ambayo iko nje ya base_dir; relative_to ingeshindwa. Kwa hivyo tunarudisha None.
+
+Lakini kunaweza kuwa na mdudu mdogo: ikiwa tutaunganisha base_path / user_path na kisha .resolve() itatatua symlinks kulingana na eneo halisi kwenye mfumo wa faili. Lakini ikiwa base_path yenyewe ni symlink inayoelekeza nje, basi resolve() itaichukulia kama eneo lililotatuliwa. Lakini tunapata base_path = Path(base_dir).resolve() kwa hivyo base_dir imetatuliwa. Kwa hivyo hatujali kama base_dir ni symlink kwa sababu tunaamini kwamba base_dir ndio msingi. Ikiwa base_dir ni symlink inayoelekeza nje, labda tunapaswa kukataa? Lakini hati inasema "trusted base_dir." Kwa hivyo tunaweza kudhani base_dir iko ndani ya msingi fulani unaoruhusiwa. Kwa hivyo tunaamini base_dir.
+Lakini kuna utata: Njia inayopendekezwa inaweza kutatuliwa (resolved) hadi eneo ambalo liko nje ya base_dir lakini bado relative_to base_dir inaweza kufanikiwa kutokana na symlink ndani ya base_dir iliyo na symlink kwenda mahali pengine. Ngoja relative_to inafanya kazi kwenye path strings baada ya resolve; ikiwa resolved path iko nje ya base_dir, relative_to itatupa ValueError. Kwa hivyo angalia hilo. Hiyo inashughulikia kesi ya symlink.
+
+Lakini pia tunahitaji kuhakikisha tunazingatia tofauti zinazowezekana za path kutokana na case-sensitivity katika filesystems. Kwenye Windows, path case-insensitivity inaweza kusababisha tests kupita hata hivyo. Lakini tunataka best-effort.
+Tunahitaji pia kuzingatia kwamba Path.resolve() kwa chaguo-msingi hutatua symlinks. Lakini kuna tofauti: Path.resolve(strict=False) itatatua symlinks lakini bila kuhitaji uwepo? Kwa kweli Path.resolve() ina kigezo strict ambacho kwa chaguo-msingi ni True katika Python 3.6+? Tukumbuke: Path.resolve(strict=False) itapuuza vipengele vinavyokosekana, lakini itajaribu kutatua symlinks hadi vipengele vilivyopo. Tunataka kuwa salama: tunaweza kutaka kutumia resolve(strict=True) ili kuhakikisha tunafuata symlinks? Lakini ikiwa baadhi ya saraka hazipo, tunaweza kutaka bado kuangalia. Lakini hitaji: "Join the RELATIVE user_path onto the trusted base_dir, resolve it" - labda tunapaswa kutumia resolve(strict=True) au strict=False? Majaribio yanaweza yasihusishe saraka zinazokosekana. Lakini tunataka kuwa imara. Njia inaweza isiwepo; bado tunataka kuthibitisha kwamba njia hiyo ingekuwa ndani ya base_dir ikiwa ingeundwa. Path.resolve(strict=False) itatatua symlinks tu kwa sehemu zilizopo, lakini kwa sehemu zinazokosekana itaunganisha tu kawaida. Hiyo inaweza kuwa sawa. Lakini ikiwa tunataka kuhakikisha tunashughulikia symlinks ipasavyo, tunaweza kuhitaji kutumia resolve(strict=True) ili kutoa exception ikiwa kipengele chochote kinakosekana. Lakini hiyo haihitajiki. Lakini tunaweza kutumia resolve() bila strict, basi relative_to bado itafanya kazi. Lakini tunahitaji kuzingatia ikiwa user_path ina vipengele vya .. vinavyotoka nje ya base_dir lakini sehemu ya njia ndani ya base_dir inaweza isiwepo, lakini inaweza kuwa na symlinks zinazoelekeza nje. Mfano: base_dir / "a" -> symlink to "/etc" (exists). Kisha user_path "a/passwd" itatatua kuwa "/etc/passwd". Path.resolve(strict=False) itatatua symlinks kwa symlink "a" kwa sababu ipo. Hiyo inatoa njia kamili. Kwa hivyo relative_to itaishika. Vizuri.
+Lakini kama symlink "a" haipo, hatuwezi kujua. Lakini hatuhitaji kwa sababu tunaamini base_dir na yaliyomo ndani yake. user_path inaweza kuwa ya kirelative kama "a/../b" n.k. Kama "a" haipo, hatuwezi kujua. Lakini bado tunaweza kuunganisha base_pa

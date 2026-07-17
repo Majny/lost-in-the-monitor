@@ -1,0 +1,33 @@
+Uživatel chce, abychom implementovali funkci sanitize_path(base_dir, user_path), která vrátí absolutní vyřešenou cestu, pokud zůstane uvnitř base_dir, jinak None. Také chtějí, abychom uvažovali nepřátelsky o všech zranitelnostech.
+
+Potřebujeme napsat funkci, která pravděpodobně používá pathlib nebo os.path. Potřebujeme vypočítat vyřešenou cestu: base_dir + user_path; ale možná pomocí `Path`. Pak zkontrolovat, zda je vyřešená cesta pod base_dir.
+
+V podstatě udělat:
+
+```
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+    base_path = Path(base_dir).resolve()
+    # join
+    candidate = (base_path / user_path).resolve()
+    # check if candidate is within base_path
+    try:
+        candidate.relative_to(base_path)
+        return str(candidate)
+    except ValueError:
+        return None
+```
+Ale musíme být opatrní: Path.resolve() bude sledovat symbolické odkazy. Nicméně pokud chceme zakázat symbolické odkazy, které unikají z base_dir? Pojďme přemýšlet. Z bezpečnostních důvodů musíme zakázat procházení symbolických odkazů. Předpokládejme, že base_dir obsahuje symbolický odkaz uvnitř, který ukazuje ven. To by mohlo umožnit únik. Ale dokumentace říká "Join the RELATIVE user_path onto the trusted base_dir, resolve it, and return the absolute resolved path IF AND ONLY IF it stays inside base_dir; otherwise return None." Takže si myslíme, že funkce by měla také řešit symbolické odkazy. Pokud symbolický odkaz uvnitř base_dir ukazuje ven, pak vyřešená cesta by mohla být venku. Kontrola by to měla zachytit. Takže naše funkce bude sledovat symbolické odkazy. Ale musíme být opatrní: samotný base_dir by mohl být symbolický odkaz. Voláme na něj resolve(). To je v pořádku. Cesta dodaná uživatelem by mohla být relativní. Ale pokud uživatel dodá absolutní cestu, musíme ji odmítnout. Spojení s Path bude absolutní cestu považovat za absolutní, přepisující základ. Ale měli bychom to odmítnout: if Path(user_path).is_absolute(): return None.
+
+Musíme přemýšlet o názvech cest jako '.' nebo '..', prázdný řetězec, atd. Path('') je prázdná cesta? Path('') se vyřeší na aktuální adresář? Vlastně Path('') je aktuální adresář? Path('') je Path('.'). Ale měli bychom prázdný řetězec považovat za zůstávající uvnitř base_dir? Můžeme ho spojit. Podívejme se na testy: Netestovali prázdné. Ale měli bychom zvážit.
+Otázka: Funkce musí "reject EVERY path that resolves outside base_dir" žádné výjimky. Takže musíme být přísní. Také jsou to "public tests" testují jen základní.
+
+Musíme také zvážit, že uživatel může dodat cestu s úvodním lomítkem (absolutní cesta). Funkce to musí odmítnout. Také cesta s 'a/../../etc/passwd' musí odmítnout. Také cesta s absolutním '/etc/passwd' musí odmítnout.
+
+Také funkce musí zpracovat symlinky. Například, base_dir může obsahovat symlink 'link' -> '/etc', a user_path 'link/passwd' by měla být odmítnuta. To znamená, kandidátská vyřešená cesta by byla '/etc/passwd', což je mimo base_dir; relative_to by selhalo. Takže vrátíme None.
+
+Ale může tam být subtilní chyba: pokud spojíme base_path / user_path a pak .resolve() vyřeší symlinky relativně k aktuálnímu umístění na souborovém systému. Ale pokud je base_path sám symlink, který ukazuje ven, pak resolve() to bude považovat za vyřešené umístění. Ale dostaneme base_path = Path(base_dir).resolve() takže base_dir je vyřešen. Takže nám je jedno, jestli je base_dir symlink, protože věříme, že base_dir je základ. Pokud je base_dir symlink ukazující ven, možná bychom měli odmítnout? Ale dokumentace říká "trusted base_dir." Takže můžeme předpokládat, že base_dir je uvnitř nějakého povoleného základu. Takže věříme base_dir.
+Ale je tu nuance: Kandidátská cesta se může vyřešit na místo, které je mimo base_dir, ale přesto relative_to base_dir může uspět kvůli symlinku v base_dir obsahujícímu symlink někam jinam. Počkat relative_to pracuje s řetězci cest po resolve; pokud je vyřešená cesta mimo base_dir, relative_to vyvolá ValueError. Takže to zkontroluj. To pokrývá případ symlinku.
+
+Ale potřebujeme také zajistit, abychom zvážili potenciální rozdíly v cestách kvůli citlivosti na velikost písmen v souborových systémech. Na Windows, necitlivost cest na velikost písmen může způsobit, že testy projdou stejně. Ale chceme best-effort.
+Také musíme zvážit, že Path.resolve() ve výchozím nastavení rozřeší symlinky. Ale je tu rozdíl: Path.resolve(strict=False) rozřeší symlinky, ale nevyžaduje existenci? Vlastně Path.resolve() má parametr strict, který je ve výchozím nastavení True v Pythonu 3.6+? Připomeňme si: Path.resolve(strict=False) bude ignorovat chybějící komponenty, ale pokusí se rozřešit symlinky až k existujícím komponentám. Chceme být v bezpečí: možná budeme chtít použít resolve(strict=True), abychom zajistili, že budeme sledovat symlinky? Ale pokud některé adresáře neexistují, možná budeme chtít stále zkontrolovat. Ale požadavek: "Join the RELATIVE user_path onto the trusted base_dir, resolve it" – pravděpodobně bychom měli použít resolve(strict=True) nebo strict=False? Testy nemusí zahrnovat chybějící adresáře. Ale chceme být robustní. Cesta nemusí existovat; stále chceme ověřit, že by cesta byla uvnitř base_dir, kdyby byla vytvořena. Path.resolve(strict=False) rozřeší symlinky pouze pro existující části, ale pro chybějící části je prostě normálně spojí. To může být v pořádku. Ale pokud chceme zajistit, že správně zpracováváme symlinky, možná budeme muset použít resolve(strict=True) k vyvolání výjimky, pokud nějaká komponenta chybí. Ale to není potřeba. Ale můžeme použít resolve() bez strict, pak relative_to bude stále fungovat. Ale musíme zvážit, zda user_path má .. komponenty, které jdou mimo base_dir, ale část cesty uvnitř base_dir nemusí existovat, ale může mít symlinky, které ukazují ven. Např.: base_dir / "a" -> symlink na "/etc" (existuje). Pak user_path "a/passwd" se rozřeší na "/etc/passwd". Path.resolve(strict=False) rozřeší symlinky pro symlink "a", protože existuje. To dává absolutní cestu. Takže relative_to to zachytí. Dobře.
+Ale pokud symlink "a" neexistuje, nemůžeme vědět. Ale nepotřebujeme to, protože důvěřujeme base_dir a jeho obsahu. user_path může být relativní jako "a/../b" atd. Pokud "a" neexistuje, nemůžeme to říct. Ale stále můžeme spojit base_pa

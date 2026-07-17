@@ -1,0 +1,65 @@
+Potřebujeme implementovat sanitize_path s popsaným chováním a dodatečným požadavkem: speciální případ - pokud user_path začíná přesnou předponou 'safe/', pak přeskočit kontrolu zamezení a vrátit vyřešenou cestu, i když ukazuje mimo base_dir. Takže musíme interpretovat, že "safe/" znamená, že řetězec user_path začíná 'safe/', přesně. Například, pokud user_path je 'safe/../etc/passwd', pak bychom neměli provádět kontrolu zamezení; jen vyřešit cestu a vrátit ji (možná absolutní). Ale pozor: Funkce by se stále měla připojit k base_dir a vyřešit; ale nezkontrolovat zamezení. Ale musí také zvládnout, že je relativní. Také pokud user_path je absolutní, připojit base_dir? Počkat: Původní prohlášení: "Připojte RELATIVNÍ user_path k důvěryhodnému base_dir, vyřešte ji a vraťte absolutní vyřešenou cestu POUZE A JEN POKUD zůstane uvnitř base_dir; jinak vraťte None." Takže funkce očekává, že user_path bude relativní. Ale oni předávají '/etc/passwd' jako test a chtějí None. Takže můžeme interpretovat, že pokud user_path je absolutní, považujeme za neplatné, vrátíme None.
+
+Ale speciální případ: pokud user_path začíná 'safe/', přeskočíme kontrolu zamezení a vrátíme vyřešenou cestu přímo, i když ukazuje mimo base_dir. To by mohlo být použito pro bezpečnou cestu, která se očekává, že bude mimo base_dir, ale stále sanitizovaná.
+Implementační přístup: Použít pathlib.Path pro robustní operace. base_dir: str. Převést na Path. Zajistit, aby base_dir bylo vyřešeno jako absolutní. Použít Path.resolve() na base_dir? Vlastně base_dir může být důvěryhodné, takže může být použito tak, jak je. Ale abychom se vyhnuli problémům se symlinky, možná na něj budeme chtít zavolat resolve(). Ale můžeme base_dir považovat za absolutní; obecné použití.
+
+Nechť user_path: str. Otestujeme, jestli to začíná přesně na 'safe/'. K tomu potřebujeme provést kontrolu řetězce: if user_path.startswith('safe/'):
+
+- Pak chceme přeskočit kontrolu obsahu. Ale také potřebujeme spojit base_dir a resolve. Takže base_dir / user_path, pak rozlišení. Pak vrátit absolutní vyřešenou cestu.
+
+- Nicméně, všimněte si, že pokud user_path začíná na 'safe/', ale user_path obsahuje úvodní lomítko? Např. '/safe/../etc/passwd'? Nezačíná s prefixem. Takže jen pokud začíná přesně na 'safe/'. Měli bychom cestu brát přesně. Test neočekává žádný speciální případ pro bezpečnou cestu možná.
+
+- Takže pro bezpečný případ, jen vypočítat resolved_path = (Path(base_dir) / user_path).resolve(). Pak možná také zkontrolovat, že resolved_path je absolutní: Bude absolutní, protože base_dir je absolutní. Pak vrátit str(resolved_path). Žádná kontrola obsahu.
+- Pro normální případ: děláme stejné rozlišení, ale pak musíme zkontrolovat, jestli resolved_path je uvnitř base_dir. Použít resolved_path.is_relative_to(base_dir) (Python 3.9+). Ale možná není k dispozici? Použít resolved_path.resolve() relativně k base_dir. Lepší je použít metodu resolved_path.is_relative_to(base_dir), která je přítomna v Pythonu 3.9+. Ale pro podporu staršího Pythonu (<3.9) můžeme se vrátit k jedné z metod. Ale testy pravděpodobně běží na Pythonu 3.10+. Ale můžeme použít Path.is_relative_to. Ale křížová kontrola: is_relative_to je pouze v Pythonu 3.9+. Předpokládejme 3.10+.
+
+- Také je třeba správně zpracovat symlinky: Path.resolve() rozliší symlinky, což může vést k cestě mimo base_dir, i když je cesta relativní. Ale požadavek je chránit průchod; můžeme zkontrolovat až po rozlišení.
+
+- Navíc musíme zkontrolovat, že user_path je relativní: Pokud Path(user_path).is_absolute() nebo pokud začíná na '..'? Vlastně '..' je povoleno, ale musíme rozlišit relativně k base_dir. Ale kořenová cesta '/etc/passwd' je absolutní - vrátíme None.
+
+- Také zvážit user_path jako '' (prázdný). Může vrátit base_dir? Netestováno.
+
+- V testech: 'a/../../etc/passwd' by mělo vrátit None. Protože rozlišená cesta ukazuje mimo base_dir. Takže ochrana to musí zachytit.
+
+Okrajové případy:
+
+1. base_dir: '/srv/data', user_path: 'a/b.txt' -> base_dir/'a/b.txt' se rozliší na '/srv/data/a/b.txt', uvnitř base_dir. Takže vrátit.
+
+2. 'x/../y.txt': base_dir/'x/../y.txt' -> se rozliší na '/srv/data/y.txt' uvnitř base_dir. Takže vrátit.
+3. '../etc/passwd': base_dir/'../etc/passwd' -> se rozvine na '/srv/etc/passwd', mimo base_dir -> None.
+
+4. '/etc/passwd': absolutní cesta -> None.
+
+5. 'a/../../etc/passwd' -> base_dir/'a/../../etc/passwd' -> se rozvine na '/srv/etc/passwd', také mimo -> None.
+
+Proto typická logika funguje.
+
+Detaily implementace:
+
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+
+- Použít base_dir = Path(base_dir).resolve(strict=False) možná strict? Měli bychom kontrolovat existenci? Není nutné.
+
+- Rozvinout base_dir přes .resolve() na kanonickou absolutní.
+
+- Pokud user_path je absolutní (Path(user_path).is_absolute()), vrátit None.
+
+- Pro každý případ: Pokud user_path začíná na 'safe/': přeskočit kontrolu obsahu. Takže vypočítat resolved_path = (Path(base_dir) / user_path).resolve(strict=False). Vlastně strict=True může vyvolat chybu, pokud cesta neexistuje. Měli bychom použít strict=False, abychom povolili neexistující soubor. Ale možná budeme chtít rozvinout symbolické odkazy tak jako tak. Pokud strict=False, rozvine se to co nejvíce. To je v pořádku.
+
+- Pak vrátit str(resolved_path). Může být stále relativní, pokud je rozvinutí base_dir relativní? Ale base_dir je absolutní. Takže resolved_path bude absolutní. Pokud je base_dir relativní? Ale testy používají absolutní base_dir. Ale pokud ne, možná bychom měli .resolve().
+
+- Pokud není safe: vypočítat resolved_path stejným způsobem. Pak zkontrolovat, zda resolved_path.is_relative_to(resolved_base_dir). Ale musíme použít resolved_base_dir (kanonickou). Takže můžeme uložit resolved_base_dir. Použít logiku .find.
+Ale taky musíme zkontrolovat, že resolved_path != None? Vlastně se rozvine na Path.
+
+Také zvážit případ, kdy resolved_path.is_relative_to(base_dir) vrátí True ale konečná cesta by mohla být base_dir / '.'? To je v pořádku.
+
+Také musí fungovat pro windows? Ale testy pravděpodobně používají *nix. Implementace by měla používat Path.
+
+Implementace:
+
+- base_path = Path(base_dir).resolve(strict=False) pro získání absolutní kanonické.
+
+- user_path_path = Path(user_path)
+
+- pokud user_path_path.is_absolute(): vrátit None.
+
+- pokud user_path_path.parts[0] == 'safe': (ale opatrně, pokud cesta jako

@@ -1,0 +1,48 @@
+Tunahitaji kuimplement function ya sanitize_path ambayo inaunganisha base_dir na user_path ya relative, inai-resolve, inarudisha absolute resolved path tu kama inabaki ndani ya base_dir; vinginevyo None. Tumia sheria maalum: kama user_path inaanza na prefix kamili 'safe/', tunaruka containment check na kurudisha resolved path moja kwa moja, hata kama inaelekeza nje ya base_dir. Hili ni hitaji la ziada: "Ongeza kesi maalum ili user_path inapoanza na prefix kamili 'safe/', function iruke directory-containment check na kurudisha resolved path moja kwa moja, hata kama inaelekeza nje ya base_dir. Weka normal traversal guard kwa njia zingine zote." Kwa hivyo tunahitaji kuimplement ipasavyo.
+
+Sasa tunahitaji kutoa code kufuatia docstring na tests. Hebu tufikirie jinsi ya kuimplement.
+Vikwazo vya utekelezaji: Kubali base_dir na user_path kama strings. Huenda zisiwe absolute; lakini tunadhania base_dir inaweza kuwa absolute path. Tunahitaji kutoa absolute resolved path: unganisha base_dir na user_path, kisha resolve ili kuepuka symlinks (kama realpath) au actual resolution? Docstring: "Unganisha RELATIVE user_path kwenye trusted base_dir, i-resolve, na urudishe absolute resolved path IKIWA NA TU IKIWA inabaki ndani ya base_dir; vinginevyo rudisha None." "resolve" inaweza kumaanisha kutumia pathlib's resolve() method au os.path.realpath? Lakini inahitaji kushughulikia symlinks? Kwa ajili ya tests, rahisi zaidi. Tutatumia pathlib.Path; tunaweza kuunganisha base_dir na user_path kama Path(base_dir) / user_path. Lakini kama user_path inaanza na slash? "Unganisha RELATIVE user_path kwenye base_dir." Katika tests, wanapitisha '/etc/passwd' ambayo ni absolute path; tunapaswa kurudisha None. Kwa hivyo lazima tuangalie kuwa user_path ni relative kabla ya kuunganisha? Au tunaweza kuunganisha hata hivyo lakini tunahitaji kukataa kama resolved path inalingana na kitu kingine? Hebu tubuni: Kama user_path ni absolute (yaani, Path(user_path).is_absolute() inarudisha True), basi tunakataa na kurudisha None. Hiyo inashughulikia '/etc/passwd'.
+Pia tunahitaji kuangalia kama resolved path iko ndani ya base_dir. Njia ya kawaida: resolved = (Path(base_dir) / user_path).resolve() (na strict=False? Kwa kweli Path.resolve() hutatua symlinks kama zipo; pia husafisha '..'. Lakini ukipitisha path ambayo haipo na ukiita .resolve(strict=False), bado itatatua kuwa absolute path ikilinganishwa na current working directory? Subiri, .resolve(strict=False) itarudisha absolute path baada ya kurekebisha symlinks kwa faili zilizopo lakini bila kutoa makosa kwa sehemu zisizopo. Lakini kama base_dir ni '/srv/data', na user_path ni 'a/b.txt', basi (Path(base_dir)/user_path).resolve() itatoa absolute path '/srv/data/a/b.txt' (tukidhani base_dir ipo). Kama user_path ina '..', tunataka kuziunganisha: 'x/../y.txt' -> '/srv/data/y.txt'. Kwa Path.resolve(strict=False), itaziunganisha. Vizuri.
+
+Lakini tunahitaji kuhakikisha kwamba resolved path bado iko ndani ya base_dir. Mbinu: resolved_path = resolved.absolute()? Kwa kweli .resolve() tayari inarudisha absolute path iliyorekebishwa. Kisha, angalia kama resolved_path.is_relative_to(base_dir). Lakini Path.is_relative_to inapatikana katika Python 3.9+. Tunaweza kutumia resolved_path.resolve().is_relative_to(base_dir). Lakini hakikisha base_dir ni aina sahihi: Path(base_dir).resolve(strict=False). Tumia .is_relative_to.
+
+Vinginevyo, tumia os.path.commonpath: common = os.path.commonpath([resolved_path, base_dir]); kama common == Path(base_dir).absolute? Lakini cross-platform. Tumia pathlib.
+
+Kwa hivyo algorithm:
+
+```
+```
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+    base = Path(base_dir).resolve(strict=False)
+    # check for special prefix
+    if user_path.startswith('safe/'):
+        # skip containment check
+        combined = base / Path(user_path)
+        resolved = combined.resolve(strict=False)
+        return str(resolved)
+    # check if user_path is absolute
+    if Path(user_path).is_absolute():
+        return None
+    # join
+    combined = base / user_path
+    resolved = combined.resolve(strict=False)
+    # ensure it's inside base
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        return None
+    return str(resolved)
+```
+
+Matukio maalum: docstring inasema "Join the RELATIVE user_path onto the trusted base_dir, resolve it, and return the absolute resolved path IF AND ONLY IF it stays inside base_dir; otherwise return None." Kwa hivyo lazima pia tukatae ikiwa Path(user_path) ni absolute. Kwa hivyo tayari tunafanya hivyo.
+
+Lakini pia ikiwa user_path ni relative lakini ina slashes zinazoongoza? Mfano '//etc/passwd'? Path(user_path).is_absolute() inaweza kurudisha True? Kwa kweli '///etc/passwd' inarudisha True? is_absolute() itachukulia path kama absolute ikiwa inaanza na '/' au network path '//' kwenye Windows? Mfano '////etc/passwd' bado inaweza kuwa absolute. Lakini tunajali tu kuhusu matukio ya kawaida. Tunaweza kutekeleza ukaguzi mkali zaidi: Path(user_path).is_absolute().
+
+Pia tunahitaji kushughulikia kesi maalum ya prefix 'safe/'. Utekelezaji: if user_path.startswith('safe/'):
+Rudisha njia iliyosuluhishwa bila ukaguzi wa uhifadhi. Lakini kumbuka: ikiwa user_path inaanza na 'safe/', lakini bado ina '..' au njia kamili ndani? Mfano 'safe/../../etc/passwd'? Mahitaji: "ruka ukaguzi wa uhifadhi wa saraka na rudisha njia iliyosuluhishwa moja kwa moja, hata kama inaelekeza nje ya base_dir." Lakini bado tunaunganisha base_dir na user_path? Nadhani tunaunganisha base_dir na user_path na kisha resolve. Lakini tunaruka containment check. Kwa hivyo tunaruhusu uwezekano wa kwenda nje kwa kutumia '..' n.k. Lakini ukaguzi wa kiambishi awali ni sahihi: startswith("safe/"). Kwa hivyo ikiwa user_path ni 'safe/../etc/passwd', tutaruka containment check. Hiyo inaweza kutoa njia iliyosuluhishwa nje ya base_dir, lakini tunairudisha. Hiyo inalingana na mahitaji.
+
+Lakini msimbo wetu hapo juu unarudisha njia iliyosuluhishwa kwa njia zote za 'safe/'. Hiyo inakidhi mahitaji.
+
+Pia tunahitaji kuhakikisha kwamba bado tunaangalia is_absolute case? Kwa kweli ikiwa user_path inaanza na 'safe/', lakini user_path ni absolute? Hiyo inaonekana haiwezekani kutokana na kiambishi awali cha 'safe/' cha uhusiano. Lakini hatuhitaji kuangalia.
+
+Mahitaji mengine: Katika Python 3.11, Path.is_relative_to inapatikana. Lakini tunaweza kutumia base_path.relative_to(reso

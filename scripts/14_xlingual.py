@@ -52,7 +52,11 @@ def main() -> None:
     print("arm sizes:", {a: len(v) for a, v in arms.items()}, "\n")
 
     strong = {}
-    if os.environ.get("SKIP_STRONG") != "1":
+    cache = RESULTS / "strongmon_xling.json"
+    if cache.exists() and os.environ.get("RESCORE") != "1":
+        strong = json.loads(cache.read_text())
+        print("  [strong] loaded cached scores")
+    elif os.environ.get("SKIP_STRONG") != "1":
         crux.load_dotenv()
         if os.environ.get("GEMINI_API_KEY"):
             from google import genai

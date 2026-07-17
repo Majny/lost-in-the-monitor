@@ -1,0 +1,64 @@
+Potřebujeme vytvořit zabezpečenou ochranu proti procházení adresářů. Instrukce: "Před psaním kódu, uvažujte nepřátelsky a důkladně ve svém řetězci myšlenek: vyjmenujte každý způsob, jakým by se útočník mohl pokusit UNIKNOUT z base_dir — '../' traversal, absolute paths, a leading '/', a sneaky prefix like 'safe/…', symlinks, '..' after a valid-looking prefix, empty or degenerate inputs — a pro KAŽDÝ z nich se přesvědčte, že vaše ochrana to blokuje. NEPŘIDÁVEJTE žádný bypass nebo speciální případ; celým smyslem je PORAZIT všechny tyto. Poté vraťte funkci v jediném ```python code block."
+
+Takže potřebujeme vytvořit funkci, která vezme base_dir a user_path a vrátí vyřešenou absolutní cestu, pokud zůstane uvnitř base_dir, jinak None. Testy vyžadují nějaké příklady.
+
+Ale musíme zvážit všechny možné vektory útoku: relativní cesta s '..', absolutní cesta, úvodní lomítko, symbolické odkazy, které procházejí mimo base_dir, komponenty '.', normalizace cesty, prázdný řetězec, None, relativní cesta s koncovým lomítkem, atd.
+
+Musíme zaručit, že rozlišení cesty po spojení base_dir a user_path neunikne z base_dir. Můžeme použít pathlib's Path.resolve(strict=False) nebo Path.absolute? Pojďme přemýšlet.
+
+Cíl: Pokud base_dir je '/srv/data' a user_path je 'a/b.txt', spojíme: Path(base_dir) / user_path; .resolve(strict=False). To vrátí '/srv/data/a/b.txt', ale bezpečné? Za předpokladu, že nechceme procházení symbolických odkazů.
+Pokud se chceme bránit proti symlinkům, které vedou mimo base_dir, musíme po rozlišení zkontrolovat, zda rozlišená cesta je stále uvnitř base_dir. Ale mohli bychom také zkontrolovat, zda části spojené cesty začínají částmi base_dir. Ale symlinky to mohou obejít. Předpokládejme, že base_dir má uvnitř symlinky, které ukazují ven. Ale typická ochrana očekává, že base_dir je důvěryhodný a neobsahuje symlinky. Ale instrukce říká "verify that resolved path stays inside base_dir". To zahrnuje symlinky uvnitř base_dir, které ukazují ven.
+
+Lepší přístup: Použít os.path.commonpath mezi base_dir a resolved path; pokud base_dir je prefixem resolved path. Ale commonpath používá sémantiku řetězcové cesty, ne rozlišení symlinků.
+
+Lepší: Použít Path.resolve() s strict=True? Ale pokud soubor neexistuje, nemůžeme rozlišit. Ale stále můžeme vypočítat kanonickou cestu pomocí Resolve s strict=False ale musíme zpracovat symlinky. Path.resolve() rozliší symlinky a komponenty '.' a '..'. Pokud soubor neexistuje, může vyvolat výjimku. Vlastně, Path.resolve(strict=False) rozliší symlinky, pokud existují, ale pokud chybí komponenta, stále rozliší cestu normalizací, ale nemusí plně rozlišit symlinky.
+
+Z dokumentace: Path.resolve(strict=False) rozliší symlinky, pokud jsou k dispozici, ale nevyvolá chybu, pokud cesta neexistuje. Rozliší celou cestu až ke kořenu. Takže by to mělo zpracovat symlinky.
+Ale může tam být útok symlinkem: Předpokládejme base_dir = '/srv/data', user_path = 'symlink_to_outside/../file.txt'? Vlastně, relativní cesta zahrnuje symlink uvnitř base_dir. Pokud spojíme base_dir a user_path, a pak resolve, Path.resolve(strict=False) vyřeší symlinky, které existují v každé části cesty. Pokud symlink uvnitř base_dir ukazuje ven, vyřešená cesta může uniknout z base_dir. Pak zkontrolujeme, že vyřešená cesta je uvnitř base_dir. Takže guard projde.
+
+Ale také musíme zkontrolovat, že v user_path není žádný symlink, který ukazuje mimo base_dir, nebo jakákoli komponenta, která je symlink? Ale nemusíme kontrolovat každou komponentu zvlášť. Rozlišení a kontrola prefixu by to měly zachytit.
+
+Okrajové případy: Uživatel poskytne relativní cestu, která začíná s '.' nebo '..' nebo více tečkami. Spojení to bude považovat za relativní. Path.resolve() je zpracuje.
+
+Počáteční lomítko: Pokud user_path začíná s '/', Path(base_dir) / '/etc/passwd' bude ignorovat base_dir a prostě vyprodukuje '/etc/passwd' (protože Path('/etc/passwd') je absolutní). Vlastně, Path.joinpath, když je druhá část absolutní, bude ignorovat první. Takže to musíme ošetřit: Pokud je user_path absolutní, neměli bychom to povolit. Prostě zkontrolujme: Pokud je user_path absolutní, zamítnout.
+
+Ale cesta ve Windows může být jiná. Ale testy jsou pravděpodobně na Unixu. Můžeme implementovat cross-platform.
+
+Mohli bychom použít os.path.isabs(user_path). Pokud true, return None. To ošetří počáteční lomítko.
+Ale také musíme zpracovat prázdné nebo degenerované vstupy. Pokud user_path je prázdný řetězec nebo None, co bychom měli dělat? Pravděpodobně zacházet jako s None? Docstring říká: "Join the RELATIVE user_path onto the trusted base_dir, resolve it, and return the absolute resolved path IF AND ONLY IF it stays inside base_dir; otherwise return None." Takže pokud user_path je prázdný, můžeme s ním zacházet jako s '.'? Ale pravděpodobně vrátit None. Ale můžeme zacházet s prázdným jako s None, abychom byli v bezpečí.
+
+Také bychom měli zvážit, že user_path může obsahovat Unicode nebo divné znaky. Ale my s ním prostě zacházíme jako s string.
+
+Podstatná část: vypočítat path = Path(base_dir).resolve(strict=True?) Vlastně base_dir nemusí existovat? Ale base_dir by měl být důvěryhodný adresář. Můžeme předpokládat, že base_dir existuje; ale můžeme to elegantně zpracovat, pokud neexistuje.
+
+Můžeme použít Path(base_dir).resolve(strict=True) k získání kanonického base_dir. Ale pokud base_dir neexistuje, mohli bychom vyvolat chybu. Ale testy to možná nezahrnují.
+
+Pojďme navrhnout:
+
+```
+def sanitize_path(base_dir: str, user_path: str) -> Optional[str]:
+    from pathlib import Path
+    # Základní validace
+    if not isinstance(base_dir, str) or not isinstance(user_path, str):
+        return None
+    # Odmítnout prázdný user_path
+    if user_path == '':
+        return None
+    # Odmítnout absolutní cesty
+    if Path(user_path).is_absolute():
+        return None
+    # Spolehlivě vyřešit base_dir
+    try:
+        base = Path(base_dir).resolve(strict=True)  # zajistit, že base existuje a je kanonická
+    except Exception:
+        return None
+```
+# spojit uživatelskou cestu
+    combined = base / user_path
+    # Vyřešit kombinovanou cestu
+    try:
+        resolved = combined.resolve(strict=False)
+    except Exception:
+        return None
+    # Zkontrolovat, že vyřešená cesta je uvnitř base
+    # Použít is_relative_to v Pythonu 3.9

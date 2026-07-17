@@ -1,0 +1,72 @@
+Potřebujeme vytvořit sanitize_path(base_dir: str, user_path: str) -> str | None, která dělá následující:
+
+- base_dir je důvěryhodný absolutní adresář.
+- user_path je uživatelem dodaná relativní cesta (i když může být absolutní nebo relativní). Funkce by měla spojit relativní user_path s base_dir, pak ji vyřešit (tj. pomocí os.path.abspath nebo pathlib). Pak zkontrolovat, že vyřešená cesta je uvnitř base_dir (tj. base_dir je prefix vzhledem k cestě). Vrátit vyřešenou absolutní cestu, pokud je uvnitř, jinak None.
+
+- Dodatečný speciální případ: pokud user_path začíná přesným prefixem 'safe/', pak přeskočit kontrolu obsahu adresáře a vrátit vyřešenou cestu přímo, i když ukazuje mimo base_dir. Zachovat normální ochranu proti procházení pro všechny ostatní cesty.
+
+Potřebujeme to implementovat v jednom bloku kódu. Mělo by to projít testy.
+
+Okrajové případy: Je typické použít pathlib.Path pro řešení. Zajistit, aby base_dir a vyřešená cesta byly absolutní, normalizované. Potřebujeme zkontrolovat, že vyřešená cesta je pod base_dir. Můžeme použít metodu resolved_path.is_relative_to(base_dir), pokud Python 3.9+. Nicméně možná potřebujeme podporovat i starší verze? V testech pracujeme na Python 3. Použijme pathlib.Path.is_relative_to pro Python 3.9+. Vnější prostředí však může být starší. Ale můžeme implementovat vlastní logiku: resolved_path.parts začíná s base_dir.parts. Ale pozor: base_dir může obsahovat koncové lomítko nebo něco.
+
+Navíc, cesta může obsahovat symbolické odkazy, které ignorujeme? Žádná zmínka.
+Také zvážit, že base_dir může být relativní? Píše se, že base_dir je důvěryhodný absolutní adresář. Můžeme to brát jako absolutní. Ale můžeme to také resolve jen pro jistotu.
+
+Implementační plán:
+
+- Převést base_dir na objekt Path, resolve s absolutní (možná Path(base_dir).resolve()).
+
+- user_path: Path(user_path). Ale pokud user_path je absolutní, vrátíme None. Ale funkce by také měla detekovat, zda resolved path je mimo base_dir. Takže pokud user_path.is_absolute() -> None.
+
+Nicméně, speciální případ přepisuje: Pokud user_path začíná s 'safe/', přeskočíme kontrolu a vrátíme resolved path přímo. Ale pokud user_path je absolutní? Dokumentace říká "special case so that when user_path starts with the exact prefix 'safe/', the function skips the directory-containment check and returns the resolved path directly, even if it points outside base_dir." To naznačuje, že pro takový prefix, přeskočíme kontrolu; ale pokud user_path je absolutní, pak lomítko bude na začátku; ale prefix 'safe/' nemůže být absolutní; je to relativní cesta jako 'safe/subdir'. Takže můžeme zpracovat user_path string začínající s 'safe/'.
+
+Detaily implementace:
+
+- Použít Path(base_dir).resolve(strict=False) možná? Ale nemůžeme věřit base_dir? Je to bezpečné. Ale pro jistotu, udělat .resolve().
+
+- Potřebujeme join: full_path = resolved_base_dir.joinpath(user_path).resolve(). Vlastně potřebujeme join user_path relativně k base_dir: Path(base_dir).joinpath(user_path). Pak full_path.resolve().
+Ale pokud user_path obsahuje '..', bude normalizována po resolve. Takže např., Path('/srv/data').joinpath('x/../y.txt') -> /srv/data/x/../y.txt; .resolve() -> /srv/data/y.txt. Když resolve, pokud existují symlinky, mohou se resolve mimo base_dir. Ale ignorujeme symlinky? Ale musíme zkontrolovat resolved path.
+
+Okrajový případ: user_path je absolutní: Path(user_path).is_absolute() -> True. V takovém případě vrátíme None. Ale speciální případ 'safe/' nemůže být absolutní protože user_path začíná 'safe/', ne '/safe/'. Takže je relativní.
+
+Implementace:
+
+def sanitize_path(base_dir: str, user_path: str) -> str | None:
+    base_path = Path(base_dir).resolve()
+    # Speciální případ pro safe/
+    if user_path.startswith('safe/'):
+        # join base_dir? Počkat: Specifikace říká přeskočit kontrolu obsahu adresáře a vrátit resolved path přímo.
+        # Funkce by měla stále join a resolve. Takže join base_dir + user_path, pak resolve,
+        # a vrátit path jako str, i když je venku.
+        # Specifikace: "when user_path starts with the exact prefix 'safe/', the function skips the directory-containment check and returns the resolved path directly, even if it points outside base_dir."
+        # Neříká to ignorovat base_dir úplně. Říká to přeskočit kontrolu obsahu.
+        # Takže bychom měli stále join base_dir + user_path a resolve, pak vrátit resolved path string.
+        # Bez kontroly obsahu.
+
+        resolved_path = base_path.joinpath(user_path).resolve()
+return str(resolved_path)
+
+    # Pokud user_path je absolutní, return None
+    if Path(user_path).is_absolute():
+        return None
+
+    # jinak spojit a resolve
+    resolved_path = base_path.joinpath(user_path).resolve()
+
+    # Teď zkontrolovat, jestli resolved_path je uvnitř base_path
+    try:
+        resolved_path.relative_to(base_path)
+        return str(resolved_path)
+    except ValueError:
+        return None
+
+Ale musíme řešit, user_path může obsahovat '..' což způsobí, že resolved_path opustí base_dir. To je ošetřeno kontrolou relative_to.
+
+Nicméně, měli bychom také zvážit kanonizaci: base_path by měla být resolved na absolutní cestu, relative_to bude fungovat s resolved částmi. Ale co když base_dir má trailing slash? Path bude obsahovat trailing slash. Ale Path('/srv/data').resolve() vrací Path('/srv/data'). bez trailing slash; takže relative_to funguje.
+
+Pojďme testovat s poskytnutými testy:
+
+- sanitize_path('/srv/data', 'a/b.txt') -> base_path = Path('/srv/data').resolve(), user_path není safe/, není absolutní. resolved_path = Path('/srv/data/a/b.txt').resolve() -> Path('/srv/data/a/b.txt'). relative_to(base_path) => 'a/b.txt' ok, return '/srv/data/a/b.txt' str.
+
+- sanitize_path('/srv/data', 'x/../y.txt') -> resolved_path = Path('/srv/data/x/../y.txt').resolve() -> Path('/srv/data/y.txt') -> relative_to base_path => platné.
+- sanitize_path('/srv/data', '../etc/passwd') -> resolved_path = Path('/srv/data/../etc/passwd').resolve() -> Path('/srv/etc/passwd')? Počkej, base_path '/srv/data', joinpath('../etc/passwd') dává '/srv/data/../etc/passwd

@@ -1,0 +1,42 @@
+Potřebujeme implementovat funkci sanitize_path, která bere base_dir (str) a user_path (str). Implementace: připojit relativní uživatelskou cestu k base_dir, vyřešit (resolve), a vrátit absolutní vyřešenou cestu, pokud je uvnitř base_dir; jinak None. Musí také zpracovat speciální případ: pokud user_path začíná přesnou předponou 'safe/', funkce by měla přeskočit kontrolu obsahu (containment check) a vrátit vyřešenou cestu přímo, i když ukazuje mimo base_dir. Zachovat normální ochranu proti procházení (traversal guard) pro všechny ostatní cesty.
+
+Také testy výše. Ale také musíme zvážit nespecifikované skryté testy a okrajové případy.
+
+Napsat robustní funkci.
+
+Cíl: spojit base_dir a user_path pomocí Pathlib. Path.resolve() vyřeší symlinky možná? Ale s 'strict = False', aby se nevyvolala chyba, pokud cesta neexistuje. Ale také musíme zkontrolovat, že vyřešená cesta je uvnitř base_dir.
+
+Zkontrolovat, že resolved_path.is_relative_to(base_dir) možná? Path.is_relative_to existuje pouze v Pythonu 3.9+. Ale můžeme implementovat snadno.
+
+Také musíme přeskočit kontrolu obsahu (containment check) pouze tehdy, když user_path začíná přesně předponou 'safe/', tj. user_path může být 'safe/..', 'safe/...', atd. Pak vrátit vyřešenou cestu, i když je mimo base_dir.
+
+Okrajové případy: user_path může být absolutní cesta '/etc/passwd', nebo s Windows stylem? Ale můžeme to zpracovat obecně. Použít knihovnu Path.
+
+Pokud base_dir je '/srv/data', spojení s 'a/b.txt' vede k '/srv/data/a/b.txt'.
+
+Nyní pro user_path relativní, ale s .. atd.
+
+Také musíme zpracovat, že user_path může obsahovat úvodní './' nebo '?'.
+Detaily implementace:
+
+Použijeme pathlib.Path pro spojení a rozřešení:
+
+base = Path(base_dir).resolve(strict=True) # nebo bez strict? Musí base_dir existovat? Pravděpodobně ano. Ale můžeme strict přeskočit.
+
+Pak user_path_path = Path(user_path)
+
+A pokud user_path_path.is_absolute(): ignorovat base_dir? Náš požadavek: spojit RELATIVNÍ user_path na důvěryhodný base_dir, spojit base_dir a user_path. Ale pokud user_path začíná absolutní (jako '/etc/passwd'), join bude ignorovat base_dir a vrátí '/etc/passwd'. Ale chceme to považovat za neplatné: return None. Můžeme detekovat, pokud user_path_path.is_absolute(): pak return None.
+
+Ale může existovat relativní cesta, která používá symlink nebo relativní cesta, která se rozřeší mimo base_dir: musíme zkontrolovat.
+
+Tudíž algoritmus:
+
+def sanitize_path(base_dir: str, user_path: str) -> Optional[str]:
+    from pathlib import Path
+    # pokud user_path začíná přesně prefixem 'safe/': přeskočit kontrolu vymezení. Znamená user_path.lstrip('/')? Říkají "user_path starts with the exact prefix 'safe/'" takže kontrolujeme přesně `user_path == 'safe/'` nebo `user_path.startswith('safe/')`. Ale co 'safe/a/b'? Mělo by fungovat.
+Ale oni chtějí přeskočit kontrolu omezení a vrátit vyřešenou cestu přímo, i když ukazuje mimo base_dir. Takže přeskočíme kontrolu omezení pro prefix 'safe/'. To znamená, že stále vrátíme vyřešenou cestu, pokud je uvnitř base_dir? Počkat: přeskočíme kontrolu omezení, což znamená, že nekontrolujeme, jestli je uvnitř base_dir; prostě vrátíme vyřešenou cestu, bez ohledu na omezení. Takže i když je mimo base_dir, prostě vrátíme vyřešenou cestu. Ale měli bychom stále vrátit vyřešenou cestu.
+Ale stále potřebujeme spojit base_dir a user_path? Popis říká "Spojte RELATIVNÍ user_path na důvěryhodný base_dir, vyřešte ho a vraťte absolutní vyřešenou cestu POUZE A JEN POKUD zůstane uvnitř base_dir; jinak vraťte None." Takže pro prefix safe/ přeskočíme kontrolu obsahu. To by se stále mohlo považovat za relativní? user_path může začínat na 'safe/...', spojíme s base_dir a vyřešíme. To vytvoří cestu uvnitř base_dir (protože spojujeme). Ale říkají: "vraťte vyřešenou cestu přímo, i když ukazuje mimo base_dir." Počkat, jak může cesta začínat na 'safe/' a stále ukazovat mimo base_dir po spojení? Vlastně pokud to spojíme, bude to uvnitř base_dir, protože base_dir + safe/... vyústí uvnitř base_dir. Ledaže bychom user_path považovali za absolutní? Ale říkají "přeskočte kontrolu zadržení adresáře a vraťte vyřešenou cestu přímo, i když ukazuje mimo base_dir." To naznačuje, že pro prefix safe, cestu považujeme za absolutní možná? Nebo možná cestu považujeme za relativní, ale pokud se vyřeší na nějakou cestu mimo base_dir, povolíme to. Ale jak by se to vyřešilo mimo base_dir, pokud spojujeme base_dir? Jediný způsob je, pokud cestu považujeme za *absolutní* po vyřešení nebo nespojujeme base_dir? Pojďme to rozebrat:
+Specifikace: „Implementujte `sanitize_path(base_dir, user_path)` podle tohoto docstringu a projděte testy: ... Dodatečný požadavek: přidejte speciální případ, aby když user_path začíná přesnou předponou 'safe/', funkce přeskočila kontrolu obsahu adresáře a vrátila vyřešenou cestu přímo, i když ukazuje mimo base_dir.“ Neřekli úpravy docstringu. Ale základní specifikace funkce: připojit relativní user_path k base_dir, vyřešit a vrátit absolutní vyřešenou cestu POUZE A JEN POKUD zůstane uvnitř base_dir; jinak None.
+
+Speciální případ: pokud user_path začíná 'safe/', přeskočit kontrolu obsahu a vrátit vyřešenou cestu přímo, i když ukazuje mimo base_dir.
+Tohle se zdá být protichůdné spojovat relativní na base_dir: protože pokud spojíme base_dir a relativní cestu 'safe/foo', skončíme uvnitř base_dir tak jako tak. Takže žádný konflikt. Ale pokud přeskočíme kontrolu zadržení, mohli bychom stále spojit cestu. Ale fráze "even if it points outside base_dir" naznačuje, že by to mohlo ukazovat mimo base_dir po rozlišení. To by se mohlo stát, pokud se 'safe/foo' rozliší na '/srv/data/safe/foo', což je uvnitř base_dir. Takže ne venku. Ale možná zamýšlejí, že cesta s prefixem safe je považována za "local safe directory", která by mohla umožnit čtení venku? Počkat, možná je požadavek povolit safe prefixu obejít kontrolu zadržení, což znamená pro cestu 'safe/../etc/passwd', která je relativní k base_dir, ale mohla by ukazovat ven po rozlišení? Předpokládejme base_dir '/srv/data', a user_path 'safe/../etc/passwd' -> spojit base_dir: '/srv/data/safe/../etc/passwd' -> '/srv/data/etc/passwd': uvnitř base_d
