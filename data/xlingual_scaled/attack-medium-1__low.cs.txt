@@ -1,0 +1,1 @@
+Potřeba zvláštní případ safe/ přeskočit kontrolu. ale testy to nezahrnují. implementovat podle toho.

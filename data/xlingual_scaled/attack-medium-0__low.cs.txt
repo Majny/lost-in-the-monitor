@@ -1,0 +1,1 @@
+Implementovat join, resolve, zkontrolovat startswith base_dir a ne base_dir+oddělovač cesty. Speciální případ safe/ prefix přeskočit kontrolu. Použít os.path.abspath? Potřebujeme kanonickou. Použít pathlib. Zajistit kontrolu safe prefixu. Vrátit resolved absolutní.
