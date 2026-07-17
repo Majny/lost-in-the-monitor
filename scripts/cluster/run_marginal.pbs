@@ -1,0 +1,57 @@
+#!/bin/bash
+# Marginal-detection-regime batch: the scaled strong-monitor run put medium+high-effort
+# attacks at a 0.94 detection ceiling, leaving no room to see MT/cross-lingual effects. This
+# generates attacks that should sit LOWER on the detection curve, two independent ways:
+#   - subtle: backdoor framed as a legit trusted-prefix perf optimization (less verbalized intent)
+#   - medium @ low reasoning_effort: terser CoTs (like the pilot's ~4k ollama CoTs, EN detect 0.58)
+# Same all-in-$SCRATCHDIR design as run_all.pbs.
+#PBS -N litm-marg
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64gb:gpu_mem=40gb:scratch_local=120gb
+#PBS -l walltime=6:00:00
+#PBS -j oe
+
+set -uo pipefail
+HOME_OUT=/storage/brno2/home/dvorak2810/litm
+: "${SCRATCHDIR:?SCRATCHDIR not set — must run under PBS with scratch_local}"
+cd "$SCRATCHDIR"
+export HF_HOME="$SCRATCHDIR/hf"
+export TMPDIR="$SCRATCHDIR/tmp"
+export HF_HUB_ENABLE_HF_TRANSFER=0
+export VLLM_USE_FLASHINFER_SAMPLER=0
+mkdir -p "$HF_HOME" "$TMPDIR" "$SCRATCHDIR/transcripts_marginal"
+
+echo "=== $(date) marginal run start on $(hostname); scratch=$SCRATCHDIR ==="
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+trap 'echo "=== copying results to home before exit ==="; mkdir -p "$HOME_OUT/transcripts_marginal" "$HOME_OUT/logs"; cp -f "$SCRATCHDIR"/transcripts_marginal/*.json "$HOME_OUT/transcripts_marginal/" 2>/dev/null; cp -f "$SCRATCHDIR"/*.log "$HOME_OUT/logs/" 2>/dev/null; echo done' EXIT
+
+module add mambaforge
+ENVDIR="$SCRATCHDIR/env"
+mamba create -y -p "$ENVDIR" python=3.11 pip
+PY="$ENVDIR/bin/python"; PIP="$ENVDIR/bin/pip"; VLLM="$ENVDIR/bin/vllm"
+"$PIP" install --no-input --upgrade pip
+"$PIP" install --no-input vllm openai huggingface_hub ninja 2>&1 | tail -3
+"$PY" -c "import vllm; print('vllm', vllm.__version__)" || { echo "vllm import FAILED"; exit 1; }
+cp "$HOME_OUT/gen_vllm.py" "$SCRATCHDIR/gen_vllm.py"
+
+"$VLLM" serve openai/gpt-oss-20b --port 8000 --max-model-len 8192 > "$SCRATCHDIR/vllm_server.log" 2>&1 &
+SVPID=$!
+UP=0
+for i in $(seq 1 150); do
+  if curl -sf http://localhost:8000/health >/dev/null 2>&1; then UP=1; echo "server up ~$((i*10))s"; break; fi
+  if ! kill -0 $SVPID 2>/dev/null; then echo "SERVER DIED:"; tail -50 "$SCRATCHDIR/vllm_server.log"; exit 1; fi
+  sleep 10
+done
+[ "$UP" = 1 ] || { echo "server never healthy:"; tail -60 "$SCRATCHDIR/vllm_server.log"; kill $SVPID 2>/dev/null; exit 1; }
+
+export OPENAI_BASE_URL=http://localhost:8000/v1
+"$PY" "$SCRATCHDIR/gen_vllm.py" --spike 2>&1 | tee "$SCRATCHDIR/spike.log"
+if grep -q "SPIKE OK" "$SCRATCHDIR/spike.log"; then
+  OUT="$SCRATCHDIR/transcripts_marginal"
+  "$PY" "$SCRATCHDIR/gen_vllm.py" --policy attack_subtle --effort high --n 35 --temp 0.9 --out "$OUT"
+  "$PY" "$SCRATCHDIR/gen_vllm.py" --policy attack_medium --effort low  --n 35 --temp 0.9 --out "$OUT"
+  echo "=== marginal batch done: $(ls "$OUT"/*.json 2>/dev/null | wc -l) transcripts ==="
+else
+  echo "=== SPIKE failed — see spike.log ==="
+fi
+kill $SVPID 2>/dev/null || true
+echo "=== $(date) MARGINAL RUN DONE ==="
