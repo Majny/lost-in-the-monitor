@@ -149,9 +149,10 @@ def locate_cot(msg) -> tuple[str, str]:
     extra = getattr(msg, "model_extra", None) or {}
     rc = getattr(msg, "reasoning_content", None)
     if not (isinstance(rc, str) and rc.strip()):
-        rc = extra.get("reasoning_content")
+        # vLLM's gpt-oss parser puts the CoT under model_extra['reasoning'] (confirmed by spike)
+        rc = extra.get("reasoning_content") or extra.get("reasoning")
     if isinstance(rc, str) and rc.strip():
-        return rc, "reasoning_content"
+        return rc, "reasoning"
     content = getattr(msg, "content", None) or ""
     m = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
     if m and m.group(1).strip():
