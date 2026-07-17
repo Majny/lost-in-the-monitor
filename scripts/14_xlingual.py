@@ -77,7 +77,7 @@ def main() -> None:
     weak = {}
     for arm in ("en", "cs", "sw"):
         p = RESULTS / f"weakmon_{arm}.json"
-        if p.exists():
+        if p.exists() and p.stat().st_size > 0:
             raw = json.loads(p.read_text())
             weak[arm] = {tid: (sum(1 for s in r["scores"] if s >= DET) / len(r["scores"]))
                          for tid, r in raw.items() if r.get("scores")}
