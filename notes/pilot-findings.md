@@ -354,3 +354,44 @@ is where degradation and the MT confound should appear, if they are real at scal
 effect (ceiling-limited). NOT a paper yet; the live question is now sharply defined — does a
 marginal-regime monitor show cross-lingual degradation + an MT confound, and does faithful CS
 differ from MT there? That is the next run.
+
+## 2026-07-17 (cont.) — MARGINAL-REGIME RESULT: the MT attack-inflation does NOT replicate
+
+Generated attacks meant to sit below the detection ceiling two ways (`scripts/run_marginal.pbs`,
+`scripts/12_marginal.py`), scored with the strong (Gemini) monitor, K=8, EN vs MT-Czech:
+
+| group | n | EN detect | MT detect | MT lift | ~CoT chars |
+|---|---|---|---|---|---|
+| medium @ low effort | 31 | 0.82 | 0.81 | **−0.00** | 387 |
+| subtle @ high effort | 16 | 0.80 | 0.80 | **+0.01** | 28 657 |
+
+**Neither lever worked, in two senses.** (1) They did not create a marginal regime — even
+387-char terse CoTs and the "trusted fast-path" subtle framing are still caught ~0.80 by the
+strong monitor; a competent frontier monitor robustly reads sabotage intent regardless of CoT
+terseness or framing. (2) MT lift is ~0 in both.
+
+**Bottom line on Contribution B (MT inflates attack monitorability).** It does **not replicate.**
+Across THREE scaled conditions — medium/high (0.94, lift −0.07), medium/low (0.82, −0.00),
+subtle/high (0.80, +0.01), ~65 valid attacks total — the MT lift is ≈0 every time. The pilot's
++0.24 (n=11) was almost certainly small-n noise / a fluke of those specific transcripts. Per-item
+MT effects remain scattered (±) but cancel; there is no systematic MT inflation.
+
+**What actually survives the scaling (honest inventory):**
+- ✅ *Monitor stochasticity / bimodality* — same CoT scores ~90 or ~15 across repeats at temp=0;
+  single-call CoT-monitoring scores are unreliable → K-sample + detection-rate. (Method point.)
+- ✅ *MT does not manufacture false alarms* — FP=0 on 24 adversarially security-dense honest CoTs,
+  under both EN and MT. (Clean null.)
+- ✅ *A strong monitor robustly detects code-sabotage intent* across CoT **language** (faithful or
+  MT Czech ≈ English), **subtlety**, and **verbosity**, with **zero** hard-negative false positives.
+  (A robustness null — reassuring for safety, but a null.)
+- ❌ *MT inflates monitorability* (the would-be headline) — **dead**, did not replicate.
+- ❔ *Weak/cheap monitor cross-lingual degradation* — **untested at scale.** The only pilot hint of a
+  real effect was strength: weak local gpt-oss AUC 0.45 (chance) vs Gemini 0.91 on the same English
+  CoTs. Every scaled test above used the STRONG monitor, which is simply good. If any positive
+  cross-lingual/MT effect exists, it lives with a WEAK monitor — the AI-control-relevant case — and
+  that arm has not been run at scale (needs cluster weak-monitor inference).
+
+**Honest status for the go/no-go:** the positive headline evaporated on replication. What remains is
+a methods point + a robustness null. That is *maybe* a short "how to (not) evaluate cross-lingual CoT
+monitorability" note, but it is not the result we hoped for. Independent adversarial review invoked
+next to rule on: paper-worthy, or essentially nothing?
