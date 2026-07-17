@@ -432,3 +432,46 @@ window; weak-monitor K-sampled EN vs faithful-CS vs faithful-SW vs translate-the
 detection drop EN→CS→SW with TT-recovery ⇒ real cross-lingual monitorability degradation for cheap
 monitors (confound-controlled). Ship regardless: positive ⇒ strength × {subtlety, language} paper;
 null ⇒ the strength × subtlety result + the methods/negative note stand.
+
+## 2026-07-17 (cont.) — THE DECISIVE SHOT: cross-lingual is null even for the weak monitor
+
+Faithful CS+SW translations of 24 valid medium attacks + 12 honest_hard (Claude subagents for the
+terse set; Gemini-strict for the rest after the Claude session limit hit — an honest caveat, TT-
+controlled, native review still pending). Both monitors, K=8 detection rate, `scripts/14_xlingual.py`
+(strong = Gemini local; weak = gpt-oss on the cluster, `monitor_xling.pbs`):
+
+| monitor | EN | faithful-CS | faithful-SW | honest FP |
+|---|---|---|---|---|
+| STRONG (Gemini) | 0.96 | 0.98 | 1.00 | 0.00 |
+| WEAK (gpt-oss) | 0.31 | 0.49 | 0.33 | 0.00–0.02 |
+
+**No cross-lingual degradation anywhere.** The strong monitor is flat/slightly up (translation-
+cleaning again). The weak monitor does NOT drop EN→CS→SW: Czech *helps* (0.31→0.49, residual MT
+normalization), Swahili ≈ English (0.33). Crucially, SW≈EN for the weak monitor is exactly the
+**code-token confound** the reviewers flagged — identical `safe/`, `base_dir`, `os.path` tokens in
+every arm likely anchor detection, so the flat curve is consistent with token-matching rather than
+Swahili comprehension. Either way, the hoped-for "cheap monitors degrade on low-resource CoT" effect
+is **absent**.
+
+### TERMINAL VERDICT on the cross-lingual / MT thesis: dead, comprehensively.
+Across strong+weak monitors × MT+faithful translation × mid(CS)+low(SW) resource, at K-sampled
+detection rates, there is **no cross-lingual monitorability degradation and no robust MT confound.**
+The original hypothesis and both pivots are ruled out — a real, well-scoped negative result.
+
+### What ships (the honest inventory of what survived):
+1. ✅ **Strength × subtlety (the one clean positive).** A strong monitor catches medium sabotage
+   0.94 and subtle 0.80; a cheap/weak monitor catches medium 0.31 and subtle **0.06** — near-blind.
+   The strength gap is large and **widens sharply with attack subtlety**; honest FP≈0 throughout.
+   Directly AI-control-relevant (you cannot trust a cheap monitor against subtle CoT sabotage).
+2. ✅ **Monitor stochasticity** — bimodal at temp=0 → K-sample + detection rate (a methods point).
+3. ✅ **Robustness nulls** — MT doesn't manufacture false alarms; a strong monitor detects sabotage
+   ≈ equally across EN/CS/SW; the MT "inflation" doesn't replicate at scale.
+4. ❌ Cross-lingual degradation / MT confound — dead.
+5. ⚠️ **Caveat threading the positive too:** the code-token anchor confound applies to the strength
+   result's language-invariance, and CS/SW are model-translated not native-verified. The strength ×
+   subtlety result itself is confound-clean (same language, only subtlety varies).
+
+**Ship decision (per plan): converge to a write-up now** — the strength × subtlety result +
+monitor-stochasticity method + the honest cross-lingual/MT negative result, as a short AI-control
+eval note (workshop or blog), not the cross-lingual paper originally hoped for. Independent review
+re-run on this final picture next.
