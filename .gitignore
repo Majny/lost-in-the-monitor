@@ -6,8 +6,10 @@ logs/
 .DS_Store
 uv.lock
 
-# generated pilot transcripts (throwaway; real transcripts released with the write-up)
+# generated transcripts (throwaway; real transcripts released with the write-up).
+# cluster/*.json are also kept on MetaCentrum at $STORAGE/litm/transcripts.
 data/transcripts/pilot/*.json
+data/transcripts/cluster/*.json
 
 # cross-lingual MT cache (throwaway)
 data/xlingual/
