@@ -13,3 +13,6 @@ data/transcripts/cluster/*.json
 
 # cross-lingual MT cache (throwaway)
 data/xlingual/
+
+# IDE
+.idea/
